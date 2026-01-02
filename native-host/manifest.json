@@ -1,0 +1,7 @@
+{
+  "name": "firefox_agent_bridge",
+  "description": "Native host for Firefox Agent Bridge",
+  "path": "__HOST_PATH__",
+  "type": "stdio",
+  "allowed_extensions": ["firefox-agent-bridge@local"]
+}

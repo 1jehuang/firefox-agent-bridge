@@ -1,0 +1,14 @@
+{
+  "name": "firefox-agent-bridge-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "host.js",
+  "scripts": {
+    "start": "node host.js",
+    "lint": "node -c host.js"
+  },
+  "dependencies": {
+    "ws": "^8.16.0"
+  }
+}
