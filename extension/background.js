@@ -3,6 +3,16 @@ const NATIVE_APP_NAME = "firefox_agent_bridge";
 
 let nativePort = null;
 let reconnectTimer = null;
+let cachedActiveTabId = null;
+let cachedWindowId = null;
+
+function roundMs(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function shouldProfile(message, params) {
+  return Boolean(message && (message.profile || (params && params.profile)));
+}
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
@@ -34,11 +44,28 @@ async function handleNativeMessage(message) {
   if (message.type && !message.action) return;
 
   const id = message.id;
+  const profile = shouldProfile(message, message.params);
+  const started = profile ? performance.now() : 0;
   try {
-    const result = await dispatchAction(message.action, message.params || {});
-    sendNative({ id, ok: true, result });
+    const result = await dispatchAction(message.action, message.params || {}, profile);
+    if (profile) {
+      const timing = { extensionMs: roundMs(performance.now() - started) };
+      if (result && result.__timing) {
+        if (typeof result.__timing.contentMs === "number") {
+          timing.contentMs = result.__timing.contentMs;
+        }
+        delete result.__timing;
+      }
+      sendNative({ id, ok: true, result, timing });
+    } else {
+      sendNative({ id, ok: true, result });
+    }
   } catch (err) {
-    sendNative({ id, ok: false, error: err && err.message ? err.message : String(err) });
+    const payload = { id, ok: false, error: err && err.message ? err.message : String(err) };
+    if (profile) {
+      payload.timing = { extensionMs: roundMs(performance.now() - started) };
+    }
+    sendNative(payload);
   }
 }
 
@@ -47,18 +74,18 @@ function sendNative(payload) {
   nativePort.postMessage(payload);
 }
 
-async function dispatchAction(action, params) {
+async function dispatchAction(action, params, profile) {
   switch (action) {
     case "ping":
       return { pong: true, time: Date.now() };
     case "navigate":
       return navigateTo(params);
     case "click":
-      return sendToContent("click", params);
+      return sendToContent("click", params, profile);
     case "type":
-      return sendToContent("type", params);
+      return sendToContent("type", params, profile);
     case "getContent":
-      return sendToContent("getContent", params);
+      return sendToContent("getContent", params, profile);
     case "screenshot":
       return captureScreenshot(params);
     case "getActiveTab":
@@ -70,15 +97,19 @@ async function dispatchAction(action, params) {
 
 async function resolveTabId(params) {
   if (params && Number.isInteger(params.tabId)) return params.tabId;
+  if (Number.isInteger(cachedActiveTabId) && Number.isInteger(cachedWindowId)) {
+    return cachedActiveTabId;
+  }
   const tabs = await browser.tabs.query({ active: true, currentWindow: true });
   if (!tabs.length) throw new Error("No active tab found");
+  cachedActiveTabId = tabs[0].id;
+  cachedWindowId = tabs[0].windowId;
   return tabs[0].id;
 }
 
 async function getActiveTabInfo() {
-  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-  if (!tabs.length) throw new Error("No active tab found");
-  const tab = tabs[0];
+  const tabId = await resolveTabId({});
+  const tab = await browser.tabs.get(tabId);
   return { tabId: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId };
 }
 
@@ -118,9 +149,10 @@ async function navigateTo(params) {
   return { tabId, url: params.url };
 }
 
-async function sendToContent(action, params) {
+async function sendToContent(action, params, profile) {
   const tabId = await resolveTabId(params || {});
   const message = { type: "agent-bridge", action, params: params || {} };
+  if (profile) message.profile = true;
   const options = {};
   if (params && Number.isInteger(params.frameId)) options.frameId = params.frameId;
   return browser.tabs.sendMessage(tabId, message, options);
@@ -134,3 +166,20 @@ async function captureScreenshot(params) {
 }
 
 connectNative();
+
+browser.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  cachedActiveTabId = tabId;
+  cachedWindowId = windowId;
+});
+
+browser.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === cachedActiveTabId) {
+    cachedActiveTabId = null;
+    cachedWindowId = null;
+  }
+});
+
+browser.windows.onFocusChanged.addListener((windowId) => {
+  cachedWindowId = windowId;
+  cachedActiveTabId = null;
+});

@@ -10,6 +10,18 @@ let requestCounter = 0;
 const pending = new Map();
 const sockets = new Set();
 
+function roundMs(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function nowNs() {
+  return process.hrtime.bigint();
+}
+
+function nsToMs(ns) {
+  return Number(ns) / 1e6;
+}
+
 function log(...args) {
   console.error("[firefox-agent-bridge]", ...args);
 }
@@ -28,9 +40,15 @@ function sendNative(message) {
 
 function handleNativeMessage(message) {
   if (message && message.id && pending.has(message.id)) {
-    const { ws, timer } = pending.get(message.id);
+    const { ws, timer, started, profile } = pending.get(message.id);
     clearTimeout(timer);
     pending.delete(message.id);
+    if (profile) {
+      const hostMs = roundMs(nsToMs(nowNs() - started));
+      const timing = message.timing && typeof message.timing === "object" ? message.timing : {};
+      timing.hostMs = hostMs;
+      message.timing = timing;
+    }
     if (ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify(message));
     }
@@ -47,16 +65,21 @@ function broadcast(message) {
   }
 }
 
-function queueRequest(id, ws) {
+function queueRequest(id, ws, started, profile) {
   const timer = setTimeout(() => {
     if (!pending.has(id)) return;
+    const entry = pending.get(id);
     pending.delete(id);
     if (ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({ id, ok: false, error: "Request timed out" }));
+      const payload = { id, ok: false, error: "Request timed out" };
+      if (entry && entry.profile && entry.started) {
+        payload.timing = { hostMs: roundMs(nsToMs(nowNs() - entry.started)) };
+      }
+      ws.send(JSON.stringify(payload));
     }
   }, REQUEST_TIMEOUT_MS);
 
-  pending.set(id, { ws, timer });
+  pending.set(id, { ws, timer, started, profile });
 }
 
 function handleSocketMessage(ws, raw) {
@@ -74,7 +97,9 @@ function handleSocketMessage(ws, raw) {
   }
 
   if (!message.id) message.id = nextId();
-  queueRequest(message.id, ws);
+  const profile = Boolean(message.profile || (message.params && message.params.profile));
+  const started = nowNs();
+  queueRequest(message.id, ws, started, profile);
   sendNative(message);
 }
 

@@ -21,4 +21,9 @@ Load the extension from `extension/manifest.json` via `about:debugging#/runtime/
 
 Default WebSocket endpoint: `ws://127.0.0.1:8765`
 
-See `docs/setup.md` and `docs/api.md` for full details.
+## Profiling
+
+Send `profile: true` with any command to receive timing breakdowns (host/extension/content).
+Use `native-host/profile-client.js` for quick latency stats.
+
+See `docs/setup.md`, `docs/api.md`, and `docs/performance.md` for full details.

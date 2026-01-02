@@ -6,7 +6,8 @@
   "main": "host.js",
   "scripts": {
     "start": "node host.js",
-    "lint": "node -c host.js"
+    "lint": "node -c host.js",
+    "profile": "node profile-client.js"
   },
   "dependencies": {
     "ws": "^8.16.0"

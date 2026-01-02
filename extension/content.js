@@ -1,13 +1,24 @@
 /* eslint-env browser */
-function textIncludes(haystack, needle) {
-  return haystack && needle && haystack.toLowerCase().includes(needle.toLowerCase());
+function roundMs(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function textIncludes(haystack, needleLower) {
+  return haystack && needleLower && haystack.toLowerCase().includes(needleLower);
 }
 
 function findByText(text) {
   if (!text) return null;
-  const elements = Array.from(document.querySelectorAll("body *"));
-  for (const el of elements) {
-    if (textIncludes(el.innerText, text)) return el;
+  const needleLower = text.toLowerCase();
+  const root = document.body || document.documentElement;
+  if (!root) return null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (textIncludes(node.nodeValue, needleLower)) {
+      return node.parentElement || node.parentNode;
+    }
+    node = walker.nextNode();
   }
   return null;
 }
@@ -46,11 +57,13 @@ async function handleClick(params) {
   }
   if (target.focus) target.focus({ preventScroll: true });
 
-  const eventInit = { bubbles: true, cancelable: true, view: window };
-  target.dispatchEvent(new MouseEvent("mouseover", eventInit));
-  target.dispatchEvent(new MouseEvent("mousedown", eventInit));
-  target.dispatchEvent(new MouseEvent("mouseup", eventInit));
-  target.dispatchEvent(new MouseEvent("click", eventInit));
+  if (params.dispatchEvents !== false) {
+    const eventInit = { bubbles: true, cancelable: true, view: window };
+    target.dispatchEvent(new MouseEvent("mouseover", eventInit));
+    target.dispatchEvent(new MouseEvent("mousedown", eventInit));
+    target.dispatchEvent(new MouseEvent("mouseup", eventInit));
+    target.dispatchEvent(new MouseEvent("click", eventInit));
+  }
   if (typeof target.click === "function") target.click();
 
   return { clicked: true, element: elementSummary(target) };
@@ -92,8 +105,10 @@ async function handleType(params) {
     }
   }
 
-  target.dispatchEvent(new Event("input", { bubbles: true }));
-  target.dispatchEvent(new Event("change", { bubbles: true }));
+  if (params.dispatchEvents !== false) {
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
   if (params.submit && target.form) {
     target.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -112,8 +127,15 @@ async function handleGetContent(params) {
     return { title: document.title, url: window.location.href };
   }
 
+  const root = document.body || document.documentElement;
+
   if (format === "text") {
-    const text = target ? target.innerText : document.body.innerText;
+    const text = target ? target.innerText : root.innerText;
+    return { text, url: window.location.href, title: document.title };
+  }
+
+  if (format === "textFast") {
+    const text = target ? target.textContent : root.textContent;
     return { text, url: window.location.href, title: document.title };
   }
 
@@ -123,15 +145,30 @@ async function handleGetContent(params) {
 
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
+  const params = message.params || {};
+  const profile = Boolean(message.profile || params.profile);
+  const started = profile ? performance.now() : 0;
 
-  switch (message.action) {
-    case "click":
-      return handleClick(message.params || {});
-    case "type":
-      return handleType(message.params || {});
-    case "getContent":
-      return handleGetContent(message.params || {});
-    default:
-      throw new Error(`Unknown content action: ${message.action}`);
-  }
+  const run = async () => {
+    switch (message.action) {
+      case "click":
+        return handleClick(params);
+      case "type":
+        return handleType(params);
+      case "getContent":
+        return handleGetContent(params);
+      default:
+        throw new Error(`Unknown content action: ${message.action}`);
+    }
+  };
+
+  return run().then((result) => {
+    if (!profile) return result;
+    const timing = { contentMs: roundMs(performance.now() - started) };
+    if (result && typeof result === "object") {
+      result.__timing = timing;
+      return result;
+    }
+    return { value: result, __timing: timing };
+  });
 });

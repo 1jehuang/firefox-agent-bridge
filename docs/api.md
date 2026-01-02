@@ -6,10 +6,15 @@ All commands are JSON objects sent over WebSocket:
 {
   "id": "optional-client-id",
   "action": "navigate | click | type | getContent | screenshot | getActiveTab | ping",
-  "params": { "...": "..." }
+  "params": { "...": "..." },
+  "profile": true
 }
 ```
 
+When `profile` (or `params.profile`) is true, responses include a `timing` object with:
+- `hostMs` (native host end-to-end)
+- `extensionMs` (background script time)
+- `contentMs` (content script time when applicable)
 ## Actions
 
 ### navigate
@@ -37,6 +42,7 @@ Params:
 - `x`, `y` (viewport coordinates)
 - `tabId` (optional)
 - `frameId` (optional)
+- `dispatchEvents` (optional, defaults true; set false for faster direct click)
 
 ### type
 
@@ -52,6 +58,7 @@ Params:
 - `submit` (optional, submit parent form)
 - `tabId` (optional)
 - `frameId` (optional)
+- `dispatchEvents` (optional, defaults true; set false to skip input/change events)
 
 ### getContent
 
@@ -60,7 +67,7 @@ Params:
 ```
 
 Params:
-- `format`: `html` | `text` | `title`
+- `format`: `html` | `text` | `textFast` | `title`
 - `selector` (optional)
 - `tabId` (optional)
 - `frameId` (optional)

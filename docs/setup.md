@@ -39,6 +39,8 @@ Responses echo the `id` (auto-generated if you omit it):
 { "id": "req_...", "ok": true, "result": { "tabId": 123, "url": "https://example.com" } }
 ```
 
+For profiling and speed tuning, see `docs/performance.md`.
+
 ## Troubleshooting
 
 - If the WebSocket server is not reachable, ensure the extension is loaded (it launches the native host).
