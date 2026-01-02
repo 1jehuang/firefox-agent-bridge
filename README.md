@@ -2,4 +2,23 @@
 
 Bridge a WebSocket-connected AI agent to a live Firefox profile via a WebExtension and native messaging host.
 
-Status: initial scaffolding. See docs/ for setup once generated.
+## Architecture
+
+- Agent connects to the local WebSocket server.
+- Native messaging host forwards commands to the Firefox extension.
+- Extension executes browser actions and returns results.
+
+## Quick start
+
+```bash
+cd native-host
+npm install
+cd ..
+./scripts/install-native-host.sh
+```
+
+Load the extension from `extension/manifest.json` via `about:debugging#/runtime/this-firefox`.
+
+Default WebSocket endpoint: `ws://127.0.0.1:8765`
+
+See `docs/setup.md` and `docs/api.md` for full details.
