@@ -57,6 +57,27 @@ async function handleClick(params) {
   }
   if (target.focus) target.focus({ preventScroll: true });
 
+  // Special handling for checkboxes and radio buttons - set .checked directly
+  const isCheckbox = target.tagName === "INPUT" && target.type === "checkbox";
+  const isRadio = target.tagName === "INPUT" && target.type === "radio";
+
+  if (isCheckbox || isRadio) {
+    const oldChecked = target.checked;
+    if (isCheckbox) {
+      // Toggle checkbox, or set to specific value if provided
+      target.checked = params.checked !== undefined ? Boolean(params.checked) : !target.checked;
+    } else {
+      // Radio buttons are always set to checked
+      target.checked = true;
+    }
+    // Dispatch change event if state changed
+    if (target.checked !== oldChecked) {
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    return { clicked: true, checked: target.checked, element: elementSummary(target) };
+  }
+
+  // Standard click handling for other elements
   if (params.dispatchEvents !== false) {
     const eventInit = { bubbles: true, cancelable: true, view: window };
     target.dispatchEvent(new MouseEvent("mouseover", eventInit));
@@ -143,6 +164,113 @@ async function handleGetContent(params) {
   return { html, url: window.location.href, title: document.title };
 }
 
+async function handleFillForm(params) {
+  if (!params.fields || !Array.isArray(params.fields)) {
+    throw new Error("Missing fields array");
+  }
+
+  const results = [];
+
+  for (const field of params.fields) {
+    const el = field.selector ? document.querySelector(field.selector) : null;
+    if (!el) {
+      results.push({ selector: field.selector, ok: false, error: "Element not found" });
+      continue;
+    }
+
+    try {
+      const tagName = el.tagName;
+      const inputType = el.type ? el.type.toLowerCase() : "";
+
+      // Handle different field types
+      if (tagName === "INPUT" && inputType === "checkbox") {
+        const shouldCheck = field.checked !== false && field.value !== false;
+        if (el.checked !== shouldCheck) {
+          el.checked = shouldCheck;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        results.push({ selector: field.selector, ok: true, type: "checkbox", checked: el.checked });
+
+      } else if (tagName === "INPUT" && inputType === "radio") {
+        el.checked = true;
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        results.push({ selector: field.selector, ok: true, type: "radio", checked: true });
+
+      } else if (tagName === "SELECT") {
+        el.value = field.value || "";
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        results.push({ selector: field.selector, ok: true, type: "select", value: el.value });
+
+      } else if (tagName === "TEXTAREA" || tagName === "INPUT") {
+        // Text inputs and textareas
+        el.focus();
+        el.value = field.value || "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        results.push({ selector: field.selector, ok: true, type: "text", value: el.value });
+
+      } else if (el.isContentEditable || el.getAttribute("contenteditable") === "true") {
+        el.focus();
+        el.textContent = field.value || "";
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
+
+      } else {
+        results.push({ selector: field.selector, ok: false, error: "Unknown field type" });
+      }
+    } catch (err) {
+      results.push({ selector: field.selector, ok: false, error: err.message });
+    }
+  }
+
+  const successCount = results.filter(r => r.ok).length;
+  return { filled: true, results, success: successCount, total: params.fields.length };
+}
+
+async function handleWaitFor(params) {
+  const timeout = params.timeout || 5000;
+  const interval = params.interval || 100;
+  const startTime = performance.now();
+
+  return new Promise((resolve, reject) => {
+    const check = () => {
+      // Check for selector
+      if (params.selector) {
+        const el = document.querySelector(params.selector);
+        if (el) {
+          return resolve({ found: true, selector: params.selector, element: elementSummary(el) });
+        }
+      }
+
+      // Check for text
+      if (params.text) {
+        const el = findByText(params.text);
+        if (el) {
+          return resolve({ found: true, text: params.text, element: elementSummary(el) });
+        }
+      }
+
+      // Check for text content contains
+      if (params.contains) {
+        const root = document.body || document.documentElement;
+        if (root && root.textContent && root.textContent.toLowerCase().includes(params.contains.toLowerCase())) {
+          return resolve({ found: true, contains: params.contains });
+        }
+      }
+
+      // Check timeout
+      if (performance.now() - startTime >= timeout) {
+        return reject(new Error(`Timeout waiting for: ${params.selector || params.text || params.contains}`));
+      }
+
+      // Keep polling
+      setTimeout(check, interval);
+    };
+
+    check();
+  });
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -157,6 +285,10 @@ browser.runtime.onMessage.addListener((message) => {
         return handleType(params);
       case "getContent":
         return handleGetContent(params);
+      case "waitFor":
+        return handleWaitFor(params);
+      case "fillForm":
+        return handleFillForm(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

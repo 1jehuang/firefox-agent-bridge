@@ -6,6 +6,48 @@ let reconnectTimer = null;
 let cachedActiveTabId = null;
 let cachedWindowId = null;
 
+// AI control tracking
+let isConnected = false;
+let activeRequests = 0;
+let recentActions = [];
+const MAX_RECENT_ACTIONS = 20;
+let badgeResetTimer = null;
+
+function updateBadge() {
+  if (activeRequests > 0) {
+    browser.browserAction.setBadgeText({ text: "AI" });
+    browser.browserAction.setBadgeBackgroundColor({ color: "#4ade80" });
+    browser.browserAction.setTitle({ title: "Browser Agent Bridge - AI Active" });
+  } else if (!isConnected) {
+    browser.browserAction.setBadgeText({ text: "!" });
+    browser.browserAction.setBadgeBackgroundColor({ color: "#ef4444" });
+    browser.browserAction.setTitle({ title: "Browser Agent Bridge - Disconnected" });
+  } else {
+    browser.browserAction.setBadgeText({ text: "" });
+    browser.browserAction.setTitle({ title: "Browser Agent Bridge - Idle" });
+  }
+  broadcastStatus();
+}
+
+function logAction(action) {
+  recentActions.unshift({ action, time: Date.now() });
+  if (recentActions.length > MAX_RECENT_ACTIONS) {
+    recentActions.pop();
+  }
+}
+
+function getStatus() {
+  return {
+    connected: isConnected,
+    active: activeRequests > 0,
+    recentActions: recentActions.slice(0, 10)
+  };
+}
+
+function broadcastStatus() {
+  browser.runtime.sendMessage({ type: "statusUpdate", state: getStatus() }).catch(() => {});
+}
+
 function roundMs(value) {
   return Math.round(value * 100) / 100;
 }
@@ -29,12 +71,18 @@ function connectNative() {
     nativePort.onMessage.addListener(handleNativeMessage);
     nativePort.onDisconnect.addListener(() => {
       nativePort = null;
+      isConnected = false;
+      updateBadge();
       scheduleReconnect();
     });
-    nativePort.postMessage({ type: "hello", version: "0.1.0" });
+    nativePort.postMessage({ type: "hello", version: "0.2.0" });
+    isConnected = true;
+    updateBadge();
   } catch (err) {
     console.error("Failed to connect native host", err);
     nativePort = null;
+    isConnected = false;
+    updateBadge();
     scheduleReconnect();
   }
 }
@@ -44,10 +92,26 @@ async function handleNativeMessage(message) {
   if (message.type && !message.action) return;
 
   const id = message.id;
+  const action = message.action;
   const profile = shouldProfile(message, message.params);
   const started = profile ? performance.now() : 0;
+
+  // Track AI activity
+  activeRequests++;
+  logAction(action);
+  updateBadge();
+
+  // Reset badge after brief delay when request completes
+  function finishRequest() {
+    activeRequests = Math.max(0, activeRequests - 1);
+    if (badgeResetTimer) clearTimeout(badgeResetTimer);
+    badgeResetTimer = setTimeout(() => {
+      updateBadge();
+    }, 500);
+  }
+
   try {
-    const result = await dispatchAction(message.action, message.params || {}, profile);
+    const result = await dispatchAction(action, message.params || {}, profile);
     if (profile) {
       const timing = { extensionMs: roundMs(performance.now() - started) };
       if (result && result.__timing) {
@@ -66,6 +130,8 @@ async function handleNativeMessage(message) {
       payload.timing = { extensionMs: roundMs(performance.now() - started) };
     }
     sendNative(payload);
+  } finally {
+    finishRequest();
   }
 }
 
@@ -86,13 +152,57 @@ async function dispatchAction(action, params, profile) {
       return sendToContent("type", params, profile);
     case "getContent":
       return sendToContent("getContent", params, profile);
+    case "waitFor":
+      return sendToContent("waitFor", params, profile);
+    case "fillForm":
+      return sendToContent("fillForm", params, profile);
     case "screenshot":
       return captureScreenshot(params);
     case "getActiveTab":
       return getActiveTabInfo();
+    case "batch":
+      return executeBatch(params, profile);
     default:
       throw new Error(`Unknown action: ${action}`);
   }
+}
+
+async function executeBatch(params, profile) {
+  if (!params.commands || !Array.isArray(params.commands)) {
+    throw new Error("batch requires commands array");
+  }
+
+  const results = [];
+  const timings = [];
+  const stopOnError = params.stopOnError !== false;
+
+  for (let i = 0; i < params.commands.length; i++) {
+    const cmd = params.commands[i];
+    const cmdStart = profile ? performance.now() : 0;
+
+    try {
+      const result = await dispatchAction(cmd.action, cmd.params || {}, false);
+      results.push({ index: i, action: cmd.action, ok: true, result });
+      if (profile) {
+        timings.push({ index: i, action: cmd.action, ms: roundMs(performance.now() - cmdStart) });
+      }
+    } catch (err) {
+      const errorResult = { index: i, action: cmd.action, ok: false, error: err.message };
+      results.push(errorResult);
+      if (profile) {
+        timings.push({ index: i, action: cmd.action, ms: roundMs(performance.now() - cmdStart), error: true });
+      }
+      if (stopOnError) {
+        break;
+      }
+    }
+  }
+
+  const response = { batch: true, results, completed: results.length, total: params.commands.length };
+  if (profile) {
+    response.timings = timings;
+  }
+  return response;
 }
 
 async function resolveTabId(params) {
@@ -182,4 +292,12 @@ browser.tabs.onRemoved.addListener((tabId) => {
 browser.windows.onFocusChanged.addListener((windowId) => {
   cachedWindowId = windowId;
   cachedActiveTabId = null;
+});
+
+// Handle messages from popup
+browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "getStatus") {
+    sendResponse(getStatus());
+  }
+  return false;
 });
