@@ -131,9 +131,30 @@ async function handleType(params) {
     target.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  if (params.submit && target.form) {
-    target.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    if (typeof target.form.submit === "function") target.form.submit();
+  if (params.submit) {
+    // First try form submit if available
+    if (target.form) {
+      target.form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      if (typeof target.form.submit === "function") target.form.submit();
+    } else {
+      // No form - simulate Enter key press (works for React/JS apps)
+      const enterEvent = new KeyboardEvent("keydown", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        bubbles: true,
+        cancelable: true
+      });
+      target.dispatchEvent(enterEvent);
+      target.dispatchEvent(new KeyboardEvent("keyup", {
+        key: "Enter",
+        code: "Enter",
+        keyCode: 13,
+        which: 13,
+        bubbles: true
+      }));
+    }
   }
 
   return { typed: true, element: elementSummary(target), length: text.length };

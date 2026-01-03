@@ -2,7 +2,7 @@
 const { WebSocketServer } = require("ws");
 
 const WS_HOST = process.env.FAB_WS_HOST || "127.0.0.1";
-const WS_PORT = Number(process.env.FAB_WS_PORT || 8765);
+const WS_PORT = Number(process.env.FAB_WS_PORT || 8766);
 const REQUEST_TIMEOUT_MS = Number(process.env.FAB_REQUEST_TIMEOUT_MS || 30000);
 
 let nativeBuffer = Buffer.alloc(0);

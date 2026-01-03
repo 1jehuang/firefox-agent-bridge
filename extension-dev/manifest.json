@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Browser Agent Bridge",
+  "name": "Browser Agent Bridge (Dev)",
   "version": "0.2.0",
-  "description": "Bridge AI agent commands to the active browser tab via native messaging.",
+  "description": "Development version - Bridge AI agent commands to the active browser tab.",
   "permissions": [
     "tabs",
     "activeTab",
@@ -22,12 +22,12 @@
     }
   ],
   "browser_action": {
-    "default_title": "Browser Agent Bridge - Idle",
+    "default_title": "Browser Agent Bridge (Dev) - Idle",
     "default_popup": "popup.html"
   },
   "applications": {
     "gecko": {
-      "id": "firefox-agent-bridge@local",
+      "id": "firefox-agent-bridge-dev@local",
       "strict_min_version": "91.0"
     }
   }
