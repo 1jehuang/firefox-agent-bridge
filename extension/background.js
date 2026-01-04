@@ -263,9 +263,9 @@ async function sendToContent(action, params, profile) {
   const tabId = await resolveTabId(params || {});
   const message = { type: "agent-bridge", action, params: params || {} };
   if (profile) message.profile = true;
-  const options = {};
-  if (params && Number.isInteger(params.frameId)) options.frameId = params.frameId;
-  return browser.tabs.sendMessage(tabId, message, options);
+  // Default to main frame (frameId: 0) to avoid responding from iframes like Stripe trackers
+  const frameId = (params && Number.isInteger(params.frameId)) ? params.frameId : 0;
+  return browser.tabs.sendMessage(tabId, message, { frameId });
 }
 
 async function captureScreenshot(params) {

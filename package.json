@@ -1,5 +1,5 @@
 {
-  "dependencies": {
+  "devDependencies": {
     "web-ext": "^9.2.0"
   }
 }
