@@ -292,6 +292,113 @@ async function handleWaitFor(params) {
   });
 }
 
+async function handleBranch(params) {
+  if (!params.alternatives || !Array.isArray(params.alternatives)) {
+    throw new Error("branch requires alternatives array");
+  }
+
+  const timeout = params.timeout || 5000;
+  const startTime = performance.now();
+  const errors = [];
+
+  // Try each alternative until one succeeds
+  for (const alt of params.alternatives) {
+    if (performance.now() - startTime > timeout) {
+      break;
+    }
+
+    try {
+      let result;
+      switch (alt.action) {
+        case "click":
+          result = await handleClick(alt.params || {});
+          break;
+        case "type":
+          result = await handleType(alt.params || {});
+          break;
+        case "waitFor":
+          result = await handleWaitFor({ ...alt.params, timeout: Math.min(alt.params?.timeout || 1000, 2000) });
+          break;
+        default:
+          continue;
+      }
+
+      // Success! Return with info about which alternative worked
+      return {
+        branch: true,
+        success: true,
+        alternativeIndex: params.alternatives.indexOf(alt),
+        action: alt.action,
+        result
+      };
+    } catch (err) {
+      errors.push({ action: alt.action, params: alt.params, error: err.message });
+    }
+  }
+
+  // All alternatives failed
+  return {
+    branch: true,
+    success: false,
+    errors,
+    message: "All alternatives failed"
+  };
+}
+
+async function handleGetInteractables(params) {
+  const root = params.selector ? document.querySelector(params.selector) : document.body;
+  if (!root) return { elements: [] };
+
+  const interactables = [];
+  const seen = new Set();
+
+  // Find clickable elements
+  const clickables = root.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"], input[type="button"]');
+  clickables.forEach((el, i) => {
+    if (i > 50) return; // Limit
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 100);
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+
+    const selector = el.id ? `#${el.id}` :
+                     el.className ? `${el.tagName.toLowerCase()}.${el.className.split(' ')[0]}` :
+                     null;
+
+    const rect = el.getBoundingClientRect();
+    interactables.push({
+      type: 'clickable',
+      tag: el.tagName,
+      text,
+      selector,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    });
+  });
+
+  // Find input fields
+  const inputs = root.querySelectorAll('input:not([type="hidden"]), textarea, select');
+  inputs.forEach((el, i) => {
+    if (i > 30) return;
+    const name = el.name || el.id || el.placeholder || '';
+    const label = el.labels?.[0]?.innerText || el.getAttribute('aria-label') || '';
+
+    interactables.push({
+      type: 'input',
+      tag: el.tagName,
+      inputType: el.type || 'text',
+      name,
+      label: label.slice(0, 50),
+      selector: el.id ? `#${el.id}` : el.name ? `[name="${el.name}"]` : null,
+      value: el.value?.slice(0, 50) || ''
+    });
+  });
+
+  return {
+    url: window.location.href,
+    title: document.title,
+    elements: interactables
+  };
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -310,6 +417,10 @@ browser.runtime.onMessage.addListener((message) => {
         return handleWaitFor(params);
       case "fillForm":
         return handleFillForm(params);
+      case "branch":
+        return handleBranch(params);
+      case "getInteractables":
+        return handleGetInteractables(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

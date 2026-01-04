@@ -156,6 +156,10 @@ async function dispatchAction(action, params, profile) {
       return sendToContent("waitFor", params, profile);
     case "fillForm":
       return sendToContent("fillForm", params, profile);
+    case "branch":
+      return sendToContent("branch", params, profile);
+    case "getInteractables":
+      return sendToContent("getInteractables", params, profile);
     case "screenshot":
       return captureScreenshot(params);
     case "getActiveTab":
