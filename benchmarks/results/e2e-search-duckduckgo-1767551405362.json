@@ -1,0 +1,10 @@
+{
+  "task": "search-duckduckgo",
+  "startTime": 1767551225242,
+  "agentThinkingMs": 0,
+  "commandExecutionMs": 180120,
+  "commandCount": 0,
+  "turns": 0,
+  "events": [],
+  "totalMs": 180120
+}

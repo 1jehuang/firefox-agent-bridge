@@ -24,12 +24,80 @@ function findByText(text) {
 }
 
 function resolveElement(params) {
-  if (params.selector) return document.querySelector(params.selector);
-  if (params.text) return findByText(params.text);
+  // Try primary selector first
+  if (params.selector) {
+    const el = document.querySelector(params.selector);
+    if (el) return el;
+  }
+
+  // Try text match
+  if (params.text) {
+    const el = findByText(params.text);
+    if (el) return el;
+  }
+
+  // Try coordinates
   if (Number.isFinite(params.x) && Number.isFinite(params.y)) {
     return document.elementFromPoint(params.x, params.y);
   }
+
+  // Smart fallbacks if selector failed
+  if (params.selector && params.smartFallback !== false) {
+    // Try variations of the selector
+    const fallbacks = generateSelectorFallbacks(params.selector);
+    for (const fallback of fallbacks) {
+      try {
+        const el = document.querySelector(fallback);
+        if (el) return el;
+      } catch (e) { /* invalid selector */ }
+    }
+
+    // Last resort: try to find by partial text in selector
+    const textMatch = params.selector.match(/["']([^"']+)["']/);
+    if (textMatch) {
+      const el = findByText(textMatch[1]);
+      if (el) return el;
+    }
+  }
+
   return null;
+}
+
+function generateSelectorFallbacks(selector) {
+  const fallbacks = [];
+
+  // If it's an ID selector, try as class or name
+  if (selector.startsWith('#')) {
+    const id = selector.slice(1);
+    fallbacks.push(`[id*="${id}"]`);  // Partial ID match
+    fallbacks.push(`.${id}`);          // As class
+    fallbacks.push(`[name="${id}"]`);  // As name
+  }
+
+  // If it's a class selector, try partial match
+  if (selector.startsWith('.')) {
+    const cls = selector.slice(1).split('.')[0];
+    fallbacks.push(`[class*="${cls}"]`);
+  }
+
+  // If it's an attribute selector, try variations
+  const attrMatch = selector.match(/\[(\w+)=["']?([^"'\]]+)["']?\]/);
+  if (attrMatch) {
+    const [, attr, value] = attrMatch;
+    fallbacks.push(`[${attr}*="${value}"]`);  // Contains
+    fallbacks.push(`[${attr}^="${value}"]`);  // Starts with
+  }
+
+  // Try aria-label if selector looks like a button/link
+  if (selector.includes('button') || selector.includes('btn') || selector.includes('link')) {
+    const textPart = selector.match(/[.#]([a-z-]+)/i);
+    if (textPart) {
+      const label = textPart[1].replace(/[-_]/g, ' ');
+      fallbacks.push(`[aria-label*="${label}" i]`);
+    }
+  }
+
+  return fallbacks;
 }
 
 function elementSummary(el) {
@@ -345,6 +413,134 @@ async function handleBranch(params) {
   };
 }
 
+function extractLinks(root, limit = 20) {
+  const links = [];
+  const seen = new Set();
+  const anchors = root.querySelectorAll('a[href]');
+
+  for (const a of anchors) {
+    if (links.length >= limit) break;
+    const href = a.href;
+    const text = (a.innerText || a.getAttribute('aria-label') || '').trim().slice(0, 80);
+
+    // Skip empty, javascript, anchor-only, or duplicate links
+    if (!href || href.startsWith('javascript:') || href === '#' || seen.has(href)) continue;
+    if (!text || text.length < 2) continue;
+
+    seen.add(href);
+    links.push({ href, text });
+  }
+  return links;
+}
+
+function extractPageSummary(maxChars = 500) {
+  // Get main content area if it exists
+  const main = document.querySelector('main, [role="main"], article, .content, #content') || document.body;
+
+  // Get headings for structure
+  const headings = [];
+  main.querySelectorAll('h1, h2, h3').forEach((h, i) => {
+    if (i < 6) headings.push(h.innerText.trim().slice(0, 60));
+  });
+
+  // Get first paragraph or main text
+  let summary = '';
+  const p = main.querySelector('p');
+  if (p) {
+    summary = p.innerText.trim().slice(0, maxChars);
+  } else {
+    summary = main.innerText.trim().slice(0, maxChars);
+  }
+
+  return { headings, summary };
+}
+
+async function handlePreexplore(params) {
+  const root = document.body;
+  if (!root) return { error: 'No body element' };
+
+  const goal = (params.goal || '').toLowerCase();
+  const maxLinks = params.maxLinks || 15;
+
+  // Get page basics
+  const url = window.location.href;
+  const title = document.title;
+  const { headings, summary } = extractPageSummary(params.summaryLength || 300);
+
+  // Get all links
+  const allLinks = extractLinks(root, 50);
+
+  // Score and filter links by relevance to goal
+  let rankedLinks = allLinks;
+  if (goal) {
+    rankedLinks = allLinks.map(link => {
+      let score = 0;
+      const textLower = link.text.toLowerCase();
+      const hrefLower = link.href.toLowerCase();
+
+      // Exact word match in text
+      if (textLower.includes(goal)) score += 10;
+      // Partial match
+      goal.split(/\s+/).forEach(word => {
+        if (word.length > 2 && textLower.includes(word)) score += 3;
+        if (word.length > 2 && hrefLower.includes(word)) score += 2;
+      });
+      // Navigation-like links get bonus
+      if (/nav|menu|sidebar/i.test(link.text)) score += 1;
+
+      return { ...link, score };
+    }).sort((a, b) => b.score - a.score);
+  }
+
+  // Get top links
+  const topLinks = rankedLinks.slice(0, maxLinks).map(l => ({
+    text: l.text,
+    href: l.href,
+    score: l.score || 0
+  }));
+
+  // Get key interactables (condensed)
+  const forms = [];
+  document.querySelectorAll('form').forEach((form, i) => {
+    if (i >= 3) return;
+    const inputs = [];
+    form.querySelectorAll('input:not([type="hidden"]), textarea, select').forEach((inp, j) => {
+      if (j >= 5) return;
+      inputs.push({
+        type: inp.type || inp.tagName.toLowerCase(),
+        name: inp.name || inp.placeholder || inp.id || ''
+      });
+    });
+    const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+    forms.push({
+      action: form.action || '',
+      inputs,
+      submitText: submit ? (submit.innerText || submit.value || 'Submit').slice(0, 30) : null
+    });
+  });
+
+  // Get key buttons (non-form)
+  const buttons = [];
+  document.querySelectorAll('button:not([type="submit"]), [role="button"]').forEach((btn, i) => {
+    if (i >= 10) return;
+    const text = (btn.innerText || btn.getAttribute('aria-label') || '').trim();
+    if (text && text.length > 1 && text.length < 50) {
+      buttons.push(text);
+    }
+  });
+
+  return {
+    url,
+    title,
+    headings,
+    summary,
+    links: topLinks,
+    forms,
+    buttons: [...new Set(buttons)].slice(0, 10),
+    goal: goal || null
+  };
+}
+
 async function handleGetInteractables(params) {
   const root = params.selector ? document.querySelector(params.selector) : document.body;
   if (!root) return { elements: [] };
@@ -421,6 +617,8 @@ browser.runtime.onMessage.addListener((message) => {
         return handleBranch(params);
       case "getInteractables":
         return handleGetInteractables(params);
+      case "preexplore":
+        return handlePreexplore(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

@@ -1,0 +1,36 @@
+{
+  "date": "2025-01-04",
+  "version": "0.6.0",
+  "benchmarks": [
+    {
+      "task": "search-duckduckgo",
+      "description": "Search DuckDuckGo for 'weather seattle', return first result",
+      "commands": 2,
+      "commandList": ["navigate", "getContent"],
+      "success": true,
+      "result": "Seattle, Washington Weather (weather.com)"
+    },
+    {
+      "task": "complaint-form-with-scout",
+      "description": "Find complaint form on brightairindustries.com using scout first",
+      "commands": 3,
+      "commandList": ["scout", "click", "getContent"],
+      "success": true,
+      "fieldsFound": 8
+    },
+    {
+      "task": "complaint-form-without-scout",
+      "description": "Find complaint form without using scout",
+      "commands": 3,
+      "commandList": ["navigate", "click", "getContent"],
+      "success": true,
+      "fieldsFound": 8
+    }
+  ],
+  "summary": {
+    "avgCommandsPerTask": 2.7,
+    "successRate": "100%",
+    "scoutOverhead": "0 commands (replaces navigate+explore)",
+    "notes": "Scout provides structured data upfront but doesn't reduce command count for simple tasks"
+  }
+}

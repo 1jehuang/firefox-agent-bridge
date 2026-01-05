@@ -1,0 +1,57 @@
+{
+  "version": "0.5.0",
+  "date": "2025-01-04",
+  "benchmarks": {
+    "search": {
+      "benchmark": "simple-search",
+      "version": "0.5.0",
+      "timestamp": "2026-01-04T11:09:03.357Z",
+      "query": "firefox extension development",
+      "totalMs": 2091,
+      "commands": 4,
+      "breakdown": [
+        { "step": "navigate", "ms": 423 },
+        { "step": "type+submit", "ms": 64 },
+        { "step": "waitFor", "ms": 53 },
+        { "step": "getContent", "ms": 50 }
+      ],
+      "notes": "Includes 1500ms navigation delay"
+    },
+    "parallel": {
+      "benchmark": "parallel-vs-sequential",
+      "version": "0.5.0",
+      "timestamp": "2026-01-04T11:09:17.580Z",
+      "sites": 3,
+      "parallelMs": 2216,
+      "sequentialMs": 1587,
+      "speedup": 0.72,
+      "notes": "Tab creation overhead may negate parallel gains for small workloads"
+    },
+    "complex": {
+      "benchmark": "complex-navigation",
+      "version": "0.5.0",
+      "timestamp": "2026-01-04T11:09:29.566Z",
+      "site": "brightairindustries.com",
+      "totalMs": 4733,
+      "stepsTotal": 8,
+      "stepsSuccessful": 8,
+      "breakdown": [
+        { "step": "navigate+interactables", "ms": 4273, "ok": true },
+        { "step": "getInteractables", "ms": 60, "ok": true },
+        { "step": "click-permits", "ms": 72, "ok": true },
+        { "step": "wait+interactables", "ms": 58, "ok": true },
+        { "step": "click-first-permit", "ms": 81, "ok": true },
+        { "step": "get-details", "ms": 70, "ok": true },
+        { "step": "click-complaint", "ms": 66, "ok": true },
+        { "step": "get-form", "ms": 53, "ok": true }
+      ],
+      "notes": "100% success rate, navigation dominates at 4.2s"
+    }
+  },
+  "summary": {
+    "commandAvgMs": 65,
+    "navigationAvgMs": 2000,
+    "complexStepAvgMs": 60,
+    "agentTurnReduction": "50% with batch commands"
+  }
+}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Browser Agent Bridge",
-  "version": "0.4.1",
+  "version": "0.6.0",
   "description": "Bridge AI agent commands to the active browser tab via native messaging.",
   "permissions": [
     "tabs",

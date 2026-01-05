@@ -1,0 +1,73 @@
+{
+  "macros": [
+    {
+      "id": "search-duckduckgo",
+      "name": "Search DuckDuckGo",
+      "trigger": "search duckduckgo for {{query}}",
+      "steps": [
+        {
+          "action": "navigate",
+          "params": { "url": "https://duckduckgo.com", "wait": true, "newTab": true }
+        },
+        {
+          "action": "waitFor",
+          "params": { "selector": "input[name='q']", "timeout": 5000 }
+        },
+        {
+          "action": "type",
+          "params": { "selector": "input[name='q']", "text": "{{query}}", "submit": true }
+        },
+        {
+          "action": "waitFor",
+          "params": { "contains": "results", "timeout": 10000 }
+        },
+        {
+          "action": "getContent",
+          "params": { "format": "text" }
+        }
+      ]
+    },
+    {
+      "id": "search-google",
+      "name": "Search Google",
+      "trigger": "search google for {{query}}",
+      "steps": [
+        {
+          "action": "navigate",
+          "params": { "url": "https://www.google.com", "wait": true, "newTab": true }
+        },
+        {
+          "action": "waitFor",
+          "params": { "selector": "textarea[name='q']", "timeout": 5000 }
+        },
+        {
+          "action": "type",
+          "params": { "selector": "textarea[name='q']", "text": "{{query}}", "submit": true }
+        },
+        {
+          "action": "waitFor",
+          "params": { "selector": "#search", "timeout": 10000 }
+        },
+        {
+          "action": "getContent",
+          "params": { "format": "text" }
+        }
+      ]
+    },
+    {
+      "id": "get-page-content",
+      "name": "Get Page Content",
+      "trigger": "get the content of {{url}}",
+      "steps": [
+        {
+          "action": "navigate",
+          "params": { "url": "{{url}}", "wait": true, "newTab": true }
+        },
+        {
+          "action": "getContent",
+          "params": { "format": "text" }
+        }
+      ]
+    }
+  ]
+}

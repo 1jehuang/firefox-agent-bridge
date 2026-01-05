@@ -160,12 +160,18 @@ async function dispatchAction(action, params, profile) {
       return sendToContent("branch", params, profile);
     case "getInteractables":
       return sendToContent("getInteractables", params, profile);
+    case "preexplore":
+      return sendToContent("preexplore", params, profile);
+    case "scout":
+      return executeScout(params, profile);
     case "screenshot":
       return captureScreenshot(params);
     case "getActiveTab":
       return getActiveTabInfo();
     case "batch":
       return executeBatch(params, profile);
+    case "parallel":
+      return executeParallel(params, profile);
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -207,6 +213,210 @@ async function executeBatch(params, profile) {
     response.timings = timings;
   }
   return response;
+}
+
+async function executeScout(params, profile) {
+  const startTime = profile ? performance.now() : 0;
+  const goal = params.goal || '';
+  const maxDepth = Math.min(params.depth || 1, 2);  // Max 2 levels deep
+  const maxPages = Math.min(params.maxPages || 5, 10);  // Max 10 pages
+  const startUrl = params.url;
+
+  if (!startUrl) throw new Error("scout requires url parameter");
+
+  const visited = new Set();
+  const results = [];
+  const createdTabs = [];
+
+  try {
+    // Create a background tab for scouting
+    const tab = await browser.tabs.create({ url: startUrl, active: false });
+    createdTabs.push(tab.id);
+    await waitForTabComplete(tab.id, 15000);
+    await new Promise(r => setTimeout(r, 200));
+
+    // Get initial page info
+    const startPage = await browser.tabs.sendMessage(tab.id,
+      { type: "agent-bridge", action: "preexplore", params: { goal, maxLinks: 10 } },
+      { frameId: 0 }
+    );
+    visited.add(startUrl);
+    results.push({ depth: 0, ...startPage });
+
+    // Explore linked pages if depth > 0
+    if (maxDepth > 0 && startPage.links) {
+      const linksToVisit = startPage.links
+        .filter(l => l.href && !visited.has(l.href) && l.href.startsWith('http'))
+        .slice(0, maxPages - 1);
+
+      for (const link of linksToVisit) {
+        if (results.length >= maxPages) break;
+        if (visited.has(link.href)) continue;
+
+        try {
+          visited.add(link.href);
+          await browser.tabs.update(tab.id, { url: link.href });
+          await waitForTabComplete(tab.id, 10000);
+          await new Promise(r => setTimeout(r, 150));
+
+          const pageInfo = await browser.tabs.sendMessage(tab.id,
+            { type: "agent-bridge", action: "preexplore", params: { goal, maxLinks: 5 } },
+            { frameId: 0 }
+          );
+          results.push({ depth: 1, fromLink: link.text, ...pageInfo });
+        } catch (err) {
+          results.push({ depth: 1, url: link.href, error: err.message });
+        }
+      }
+    }
+
+    // Cleanup
+    await browser.tabs.remove(tab.id);
+
+    // Build summary for agent
+    const summary = {
+      goal,
+      pagesExplored: results.length,
+      startUrl,
+      sitemap: results.map(r => ({
+        depth: r.depth,
+        url: r.url,
+        title: r.title,
+        headings: r.headings,
+        buttons: r.buttons,
+        formCount: r.forms?.length || 0,
+        linkCount: r.links?.length || 0,
+        relevantLinks: r.links?.filter(l => l.score > 0).slice(0, 3) || []
+      })),
+      allForms: results.flatMap(r => (r.forms || []).map(f => ({
+        page: r.title,
+        url: r.url,
+        ...f
+      }))),
+      suggestedActions: []
+    };
+
+    // Generate suggested actions based on goal
+    if (goal) {
+      const goalLower = goal.toLowerCase();
+      for (const page of results) {
+        // Check buttons
+        for (const btn of (page.buttons || [])) {
+          if (btn.toLowerCase().includes(goalLower)) {
+            summary.suggestedActions.push({
+              type: 'click',
+              text: btn,
+              page: page.title,
+              url: page.url
+            });
+          }
+        }
+        // Check links
+        for (const link of (page.links || [])) {
+          if (link.score > 5) {
+            summary.suggestedActions.push({
+              type: 'navigate',
+              text: link.text,
+              href: link.href,
+              score: link.score
+            });
+          }
+        }
+      }
+    }
+
+    if (profile) {
+      summary.timing = { totalMs: roundMs(performance.now() - startTime) };
+    }
+
+    return summary;
+
+  } catch (err) {
+    // Cleanup on error
+    for (const tabId of createdTabs) {
+      try { await browser.tabs.remove(tabId); } catch (e) {}
+    }
+    throw err;
+  }
+}
+
+async function executeParallel(params, profile) {
+  if (!params.branches || !Array.isArray(params.branches)) {
+    throw new Error("parallel requires branches array");
+  }
+
+  const startTime = profile ? performance.now() : 0;
+  const createdTabs = [];
+
+  try {
+    // Create a new tab for each branch
+    const branchPromises = params.branches.map(async (branch, branchIndex) => {
+      const branchStart = profile ? performance.now() : 0;
+
+      // Create new tab for this branch
+      const tab = await browser.tabs.create({ url: branch.url || "about:blank", active: false });
+      createdTabs.push(tab.id);
+
+      // Wait for page load if URL provided
+      if (branch.url) {
+        await waitForTabComplete(tab.id, branch.timeoutMs || 15000);
+        // Small delay for content script
+        await new Promise(r => setTimeout(r, 100));
+      }
+
+      // Execute commands in this tab
+      const results = [];
+      const commands = branch.commands || [];
+
+      for (let i = 0; i < commands.length; i++) {
+        const cmd = commands[i];
+        try {
+          // Force commands to use this specific tab
+          const cmdParams = { ...cmd.params, tabId: tab.id };
+          const result = await dispatchAction(cmd.action, cmdParams, false);
+          results.push({ index: i, action: cmd.action, ok: true, result });
+        } catch (err) {
+          results.push({ index: i, action: cmd.action, ok: false, error: err.message });
+          if (branch.stopOnError !== false) break;
+        }
+      }
+
+      // Close tab if requested
+      if (branch.closeTab !== false && !branch.keepTab) {
+        try {
+          await browser.tabs.remove(tab.id);
+          createdTabs.splice(createdTabs.indexOf(tab.id), 1);
+        } catch (e) { /* tab may already be closed */ }
+      }
+
+      return {
+        branchIndex,
+        tabId: tab.id,
+        url: branch.url,
+        results,
+        completed: results.length,
+        total: commands.length,
+        timing: profile ? { ms: roundMs(performance.now() - branchStart) } : undefined
+      };
+    });
+
+    // Wait for all branches to complete
+    const branchResults = await Promise.all(branchPromises);
+
+    return {
+      parallel: true,
+      branches: branchResults,
+      totalBranches: params.branches.length,
+      timing: profile ? { totalMs: roundMs(performance.now() - startTime) } : undefined
+    };
+
+  } catch (err) {
+    // Clean up any created tabs on error
+    for (const tabId of createdTabs) {
+      try { await browser.tabs.remove(tabId); } catch (e) { }
+    }
+    throw err;
+  }
 }
 
 async function resolveTabId(params) {
@@ -252,15 +462,33 @@ async function waitForTabComplete(tabId, timeoutMs = 15000) {
 
 async function navigateTo(params) {
   if (!params || !params.url) throw new Error("Missing url parameter");
+  let tabId;
+
   if (params.newTab) {
     const tab = await browser.tabs.create({ url: params.url, active: true });
-    if (params.wait) await waitForTabComplete(tab.id, params.timeoutMs);
-    return { tabId: tab.id, url: params.url };
+    tabId = tab.id;
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+  } else {
+    tabId = await resolveTabId(params);
+    await browser.tabs.update(tabId, { url: params.url });
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
   }
-  const tabId = await resolveTabId(params);
-  await browser.tabs.update(tabId, { url: params.url });
-  if (params.wait) await waitForTabComplete(tabId, params.timeoutMs);
-  return { tabId, url: params.url };
+
+  const result = { tabId, url: params.url };
+
+  // Auto-return interactables if requested (saves an agent turn!)
+  if (params.returnInteractables) {
+    try {
+      // Small delay to ensure content script is ready
+      await new Promise(r => setTimeout(r, 100));
+      const interactables = await sendToContent("getInteractables", {}, false);
+      result.interactables = interactables;
+    } catch (err) {
+      result.interactablesError = err.message;
+    }
+  }
+
+  return result;
 }
 
 async function sendToContent(action, params, profile) {
