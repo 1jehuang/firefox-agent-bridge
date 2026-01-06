@@ -595,6 +595,187 @@ async function handleGetInteractables(params) {
   };
 }
 
+// Auth page detection patterns
+const AUTH_URL_PATTERNS = [
+  /\/login/i, /\/signin/i, /\/sign-in/i, /\/auth/i, /\/oauth/i,
+  /\/authorize/i, /\/authenticate/i, /\/sso/i,
+  /accounts\.google/i, /github\.com\/login/i, /microsoft.*login/i,
+  /login\.microsoftonline/i, /auth0\.com/i, /okta\.com/i
+];
+
+const OAUTH_PROVIDERS = [
+  { name: "Google", patterns: [/google/i, /gmail/i] },
+  { name: "GitHub", patterns: [/github/i] },
+  { name: "Microsoft", patterns: [/microsoft/i, /azure/i, /outlook/i] },
+  { name: "Facebook", patterns: [/facebook/i, /meta/i] },
+  { name: "Apple", patterns: [/apple/i, /icloud/i] },
+  { name: "Twitter", patterns: [/twitter/i, /x\.com/i] }
+];
+
+function detectAuthType() {
+  const url = window.location.href.toLowerCase();
+  const body = document.body;
+
+  // Check for 2FA page
+  const has2FAIndicators = body && (
+    body.innerText.match(/two.?factor|2fa|verification code|authenticator|security code/i) ||
+    document.querySelector('input[name*="otp" i], input[name*="code" i], input[name*="totp" i]')
+  );
+  if (has2FAIndicators) return "2fa";
+
+  // Check for password reset
+  if (url.match(/reset|forgot|recover/i) && document.querySelector('input[type="password"], input[type="email"]')) {
+    return "password-reset";
+  }
+
+  // Check for OAuth consent page
+  if (url.match(/consent|authorize|permission|scope/i)) {
+    return "oauth";
+  }
+
+  // Standard login
+  const hasPassword = document.querySelector('input[type="password"]');
+  const hasUsername = document.querySelector('input[name*="user" i], input[name*="email" i], input[name*="login" i], input[type="email"]');
+  if (hasPassword || hasUsername) return "login";
+
+  return null;
+}
+
+function detectProvider() {
+  const url = window.location.href;
+  const html = document.documentElement.outerHTML;
+
+  for (const provider of OAUTH_PROVIDERS) {
+    for (const pattern of provider.patterns) {
+      if (pattern.test(url) || pattern.test(html.slice(0, 5000))) {
+        return provider.name;
+      }
+    }
+  }
+
+  // Check for OAuth buttons
+  const oauthButtons = [];
+  document.querySelectorAll('button, a').forEach(el => {
+    const text = (el.innerText || el.getAttribute('aria-label') || '').toLowerCase();
+    if (text.match(/sign in with|login with|continue with/i)) {
+      for (const provider of OAUTH_PROVIDERS) {
+        if (provider.patterns.some(p => p.test(text))) {
+          oauthButtons.push(provider.name);
+        }
+      }
+    }
+  });
+
+  return oauthButtons.length > 0 ? oauthButtons : null;
+}
+
+function findVisibleAccounts() {
+  const accounts = [];
+  const seen = new Set();
+
+  // Email patterns
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+  // Check visible text (limited scope to avoid picking up unrelated emails)
+  const searchAreas = [
+    document.querySelector('[class*="account" i], [class*="profile" i], [class*="user" i]'),
+    document.querySelector('header, nav, [role="banner"]'),
+    document.querySelector('[data-email], [data-user]')
+  ].filter(Boolean);
+
+  for (const area of searchAreas) {
+    const text = area.innerText || '';
+    const matches = text.match(emailRegex) || [];
+    for (const email of matches) {
+      if (!seen.has(email)) {
+        seen.add(email);
+        accounts.push(email);
+      }
+    }
+  }
+
+  // Check pre-filled input fields
+  document.querySelectorAll('input[type="email"], input[name*="email" i], input[name*="user" i]').forEach(input => {
+    if (input.value && input.value.includes('@') && !seen.has(input.value)) {
+      seen.add(input.value);
+      accounts.push(input.value);
+    }
+  });
+
+  // Check account picker/switcher elements
+  document.querySelectorAll('[class*="account" i] img[alt], [class*="avatar" i][title]').forEach(el => {
+    const text = el.alt || el.title || '';
+    const match = text.match(emailRegex);
+    if (match && !seen.has(match[0])) {
+      seen.add(match[0]);
+      accounts.push(match[0]);
+    }
+  });
+
+  return accounts.slice(0, 5); // Limit to 5 accounts
+}
+
+function getFormFields() {
+  const fields = [];
+  document.querySelectorAll('input:not([type="hidden"]):not([type="submit"])').forEach(input => {
+    const type = input.type || 'text';
+    const name = input.name || input.id || input.placeholder || type;
+    if (!fields.includes(name)) {
+      fields.push(name);
+    }
+  });
+  return fields.slice(0, 10);
+}
+
+function getOAuthOptions() {
+  const options = [];
+  const seen = new Set();
+
+  document.querySelectorAll('button, a, [role="button"]').forEach(el => {
+    const text = (el.innerText || el.getAttribute('aria-label') || '').trim();
+    if (text.match(/sign in with|login with|continue with/i)) {
+      const providerMatch = text.match(/with\s+(\w+)/i);
+      if (providerMatch && !seen.has(providerMatch[1])) {
+        seen.add(providerMatch[1]);
+        options.push(providerMatch[1]);
+      }
+    }
+  });
+
+  return options;
+}
+
+async function handleDetectAuth() {
+  const url = window.location.href;
+
+  // Check if URL matches auth patterns
+  const isAuthUrl = AUTH_URL_PATTERNS.some(p => p.test(url));
+
+  // Detect auth type from page content
+  const authType = detectAuthType();
+  const isAuthPage = isAuthUrl || authType !== null;
+
+  if (!isAuthPage) {
+    return {
+      isAuthPage: false,
+      authType: null,
+      detectedProvider: null,
+      availableAccounts: [],
+      formFields: [],
+      oauthOptions: []
+    };
+  }
+
+  return {
+    isAuthPage: true,
+    authType: authType || "login",
+    detectedProvider: detectProvider(),
+    availableAccounts: findVisibleAccounts(),
+    formFields: getFormFields(),
+    oauthOptions: getOAuthOptions()
+  };
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -619,6 +800,8 @@ browser.runtime.onMessage.addListener((message) => {
         return handleGetInteractables(params);
       case "preexplore":
         return handlePreexplore(params);
+      case "detectAuth":
+        return handleDetectAuth();
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

@@ -57,6 +57,14 @@ node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
 | `branch` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
 | `scout` | Explore site structure | `url`, `goal`, `depth`, `maxPages` |
 
+### Authentication
+
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `getAuthContext` | Detect if page is login/auth, get available accounts | - |
+| `requestAuth` | Request user approval for auth action | `reason` |
+| `configureAuth` | Set auth preferences | `authMode`, `setSiteRule`, `domain` |
+
 ## Common Patterns
 
 ### 1. Navigate and Understand Page (Recommended First Step)
@@ -171,6 +179,56 @@ node ~/.claude/skills/firefox-browser/macro.js "search google for best restauran
 
 # Get page content
 node ~/.claude/skills/firefox-browser/macro.js "get the content of https://example.com"
+```
+
+### 8. Working with Authentication
+
+The bridge can detect auth pages and leverage the user's existing browser sessions:
+
+```bash
+# Check if current page is a login page
+node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
+```
+
+Returns:
+```json
+{
+  "isAuthPage": true,
+  "authType": "login",
+  "detectedProvider": "Google",
+  "availableAccounts": ["j***@gmail.com"],
+  "formFields": ["email", "password"],
+  "oauthOptions": ["Google", "GitHub"],
+  "pageTitle": "Sign in",
+  "config": {"authMode": "always-allow"}
+}
+```
+
+**Auth workflow:**
+```bash
+# Navigate to a site requiring login
+node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://github.com/settings"}'
+
+# Check auth context
+node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
+
+# If already logged in (user's browser has cookies), just proceed
+# If login page detected, the user can leverage their saved accounts
+
+# Request auth with reason (shows desktop notification in "ask" mode)
+node ~/.claude/skills/firefox-browser/client.js requestAuth '{"reason": "Access GitHub settings"}'
+```
+
+**Configure auth preferences:**
+```bash
+# Set global mode: always-allow (default), ask, or always-deny
+node ~/.claude/skills/firefox-browser/client.js configureAuth '{"authMode": "always-allow"}'
+
+# Set per-site rule
+node ~/.claude/skills/firefox-browser/client.js configureAuth '{"domain": "github.com", "setSiteRule": "allow"}'
+
+# Remove site rule
+node ~/.claude/skills/firefox-browser/client.js configureAuth '{"domain": "example.com", "setSiteRule": "remove"}'
 ```
 
 ## Tips

@@ -13,6 +13,121 @@ let recentActions = [];
 const MAX_RECENT_ACTIONS = 20;
 let badgeResetTimer = null;
 
+// Auth config defaults
+const DEFAULT_AUTH_CONFIG = {
+  authNotifications: true,
+  authMode: "always-allow", // "ask" | "always-allow" | "always-deny"
+  siteRules: {},   // domain -> "allow" | "deny"
+  notifyOnAuthPage: true
+};
+
+let authConfig = { ...DEFAULT_AUTH_CONFIG };
+let pendingAuthRequests = new Map(); // notificationId -> { tabId, domain, resolve, reject }
+
+// Load auth config on startup
+async function loadAuthConfig() {
+  try {
+    const stored = await browser.storage.local.get("authConfig");
+    if (stored.authConfig) {
+      authConfig = { ...DEFAULT_AUTH_CONFIG, ...stored.authConfig };
+    }
+  } catch (err) {
+    console.error("Failed to load auth config:", err);
+  }
+}
+
+async function saveAuthConfig() {
+  try {
+    await browser.storage.local.set({ authConfig });
+  } catch (err) {
+    console.error("Failed to save auth config:", err);
+  }
+}
+
+function getDomainFromUrl(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+function maskEmail(email) {
+  if (!email || !email.includes("@")) return email;
+  const [local, domain] = email.split("@");
+  if (local.length <= 2) return `${local[0]}***@${domain}`;
+  return `${local[0]}***${local[local.length - 1]}@${domain}`;
+}
+
+async function showAuthNotification(tabId, authInfo) {
+  if (!authConfig.authNotifications) return { allowed: authConfig.authMode === "always-allow" };
+
+  const domain = getDomainFromUrl(authInfo.url);
+
+  // Check site rules first
+  if (domain && authConfig.siteRules[domain]) {
+    return { allowed: authConfig.siteRules[domain] === "allow", cached: true };
+  }
+
+  // Check global mode
+  if (authConfig.authMode === "always-allow") return { allowed: true };
+  if (authConfig.authMode === "always-deny") return { allowed: false };
+
+  // Ask mode - show notification
+  const maskedAccounts = (authInfo.availableAccounts || []).map(maskEmail);
+  const accountText = maskedAccounts.length > 0
+    ? `Account: ${maskedAccounts[0]}`
+    : "No saved account detected";
+
+  const notificationId = `auth-${Date.now()}`;
+
+  return new Promise((resolve) => {
+    browser.notifications.create(notificationId, {
+      type: "basic",
+      iconUrl: browser.runtime.getURL("icons/icon-48.png"),
+      title: `🔐 Auth: ${authInfo.detectedProvider || domain || "Login"}`,
+      message: `${accountText}\nPage: ${authInfo.pageTitle || domain}\nReason: ${authInfo.reason || "Agent requested access"}`
+    });
+
+    pendingAuthRequests.set(notificationId, {
+      tabId,
+      domain,
+      authInfo,
+      resolve,
+      timeout: setTimeout(() => {
+        pendingAuthRequests.delete(notificationId);
+        browser.notifications.clear(notificationId);
+        resolve({ allowed: false, reason: "timeout" });
+      }, 30000) // 30 second timeout
+    });
+  });
+}
+
+// Handle notification clicks (allow)
+browser.notifications.onClicked.addListener((notificationId) => {
+  const pending = pendingAuthRequests.get(notificationId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingAuthRequests.delete(notificationId);
+    browser.notifications.clear(notificationId);
+    pending.resolve({ allowed: true, userApproved: true });
+  }
+});
+
+// Handle notification closed (deny)
+browser.notifications.onClosed.addListener((notificationId, byUser) => {
+  const pending = pendingAuthRequests.get(notificationId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingAuthRequests.delete(notificationId);
+    if (byUser) {
+      pending.resolve({ allowed: false, userDenied: true });
+    }
+  }
+});
+
+loadAuthConfig();
+
 function updateBadge() {
   if (activeRequests > 0) {
     browser.browserAction.setBadgeText({ text: "AI" });
@@ -172,6 +287,12 @@ async function dispatchAction(action, params, profile) {
       return executeBatch(params, profile);
     case "parallel":
       return executeParallel(params, profile);
+    case "getAuthContext":
+      return getAuthContext(params, profile);
+    case "configureAuth":
+      return configureAuth(params);
+    case "requestAuth":
+      return requestAuth(params);
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -338,6 +459,63 @@ async function executeScout(params, profile) {
     }
     throw err;
   }
+}
+
+async function getAuthContext(params, profile) {
+  const tabId = await resolveTabId(params);
+  const tab = await browser.tabs.get(tabId);
+
+  // Get auth detection from content script
+  const authInfo = await sendToContent("detectAuth", params, false);
+
+  return {
+    ...authInfo,
+    url: tab.url,
+    pageTitle: tab.title,
+    config: {
+      authMode: authConfig.authMode,
+      siteRule: authConfig.siteRules[getDomainFromUrl(tab.url)] || null
+    }
+  };
+}
+
+async function configureAuth(params) {
+  if (params.authMode && ["ask", "always-allow", "always-deny"].includes(params.authMode)) {
+    authConfig.authMode = params.authMode;
+  }
+  if (typeof params.authNotifications === "boolean") {
+    authConfig.authNotifications = params.authNotifications;
+  }
+  if (params.setSiteRule && params.domain) {
+    if (params.setSiteRule === "remove") {
+      delete authConfig.siteRules[params.domain];
+    } else if (["allow", "deny"].includes(params.setSiteRule)) {
+      authConfig.siteRules[params.domain] = params.setSiteRule;
+    }
+  }
+  await saveAuthConfig();
+  return { ok: true, config: authConfig };
+}
+
+async function requestAuth(params) {
+  const tabId = await resolveTabId(params);
+  const tab = await browser.tabs.get(tabId);
+
+  // Get current auth context
+  const authInfo = await sendToContent("detectAuth", params, false);
+
+  // Add reason from agent
+  authInfo.reason = params.reason || "Agent requested authentication";
+  authInfo.url = tab.url;
+  authInfo.pageTitle = tab.title;
+
+  // Show notification and wait for response
+  const result = await showAuthNotification(tabId, authInfo);
+
+  return {
+    ...result,
+    authContext: authInfo
+  };
 }
 
 async function executeParallel(params, profile) {
