@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wizard Step 2 - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .progress { display: flex; margin: 20px 0; }
+    .step { flex: 1; text-align: center; padding: 10px; background: #e0e0e0; }
+    .step.active { background: #007bff; color: white; }
+    .step.completed { background: #28a745; color: white; }
+    label { display: block; margin-top: 15px; font-weight: bold; }
+    select, input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    .radio-group { margin-top: 10px; }
+    .radio-group label { display: flex; align-items: center; font-weight: normal; margin-top: 8px; }
+    .radio-group input { width: auto; margin-right: 10px; }
+    .buttons { display: flex; gap: 10px; margin-top: 20px; }
+    button { flex: 1; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    .btn-back { background: #6c757d; color: white; }
+    .btn-next { background: #007bff; color: white; }
+    button:hover { opacity: 0.9; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Setup Wizard</h1>
+
+  <div class="progress">
+    <div class="step completed">1. Personal Info</div>
+    <div class="step active">2. Preferences</div>
+    <div class="step">3. Confirm</div>
+  </div>
+
+  <h2>Step 2: Preferences</h2>
+
+  <form id="step2Form">
+    <label for="plan">Select Plan</label>
+    <select id="plan" name="plan" required>
+      <option value="">Choose a plan...</option>
+      <option value="free">Free - Basic features</option>
+      <option value="pro">Pro - $9/month</option>
+      <option value="enterprise">Enterprise - $49/month</option>
+    </select>
+
+    <label>Notification Frequency</label>
+    <div class="radio-group">
+      <label>
+        <input type="radio" name="notifications" value="daily" required>
+        Daily digest
+      </label>
+      <label>
+        <input type="radio" name="notifications" value="weekly">
+        Weekly summary
+      </label>
+      <label>
+        <input type="radio" name="notifications" value="none">
+        No notifications
+      </label>
+    </div>
+
+    <label for="timezone">Timezone</label>
+    <select id="timezone" name="timezone" required>
+      <option value="">Select timezone...</option>
+      <option value="UTC">UTC</option>
+      <option value="America/New_York">Eastern Time</option>
+      <option value="America/Chicago">Central Time</option>
+      <option value="America/Denver">Mountain Time</option>
+      <option value="America/Los_Angeles">Pacific Time</option>
+    </select>
+
+    <div class="buttons">
+      <button type="button" class="btn-back" onclick="goBack()">Back</button>
+      <button type="submit" class="btn-next">Next Step</button>
+    </div>
+  </form>
+
+  <p style="margin-top: 30px;"><a href="/">Cancel and return home</a></p>
+
+  <script>
+    // Check if step 1 was completed
+    const savedData = JSON.parse(localStorage.getItem('wizardData') || '{}');
+    if (!savedData.firstName) {
+      window.location.href = '/wizard/step1.html';
+    }
+
+    // Load saved preferences if any
+    if (savedData.plan) document.getElementById('plan').value = savedData.plan;
+    if (savedData.notifications) {
+      document.querySelector(`input[value="${savedData.notifications}"]`).checked = true;
+    }
+    if (savedData.timezone) document.getElementById('timezone').value = savedData.timezone;
+
+    function goBack() {
+      window.location.href = '/wizard/step1.html';
+    }
+
+    document.getElementById('step2Form').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const data = {
+        ...savedData,
+        plan: document.getElementById('plan').value,
+        notifications: document.querySelector('input[name="notifications"]:checked').value,
+        timezone: document.getElementById('timezone').value
+      };
+
+      localStorage.setItem('wizardData', JSON.stringify(data));
+      window.location.href = '/wizard/step3.html';
+    });
+  </script>
+</body>
+</html>

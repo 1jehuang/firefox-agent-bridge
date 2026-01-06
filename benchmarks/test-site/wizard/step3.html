@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wizard Step 3 - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .progress { display: flex; margin: 20px 0; }
+    .step { flex: 1; text-align: center; padding: 10px; background: #e0e0e0; }
+    .step.active { background: #007bff; color: white; }
+    .step.completed { background: #28a745; color: white; }
+    .summary { background: #f9f9f9; padding: 20px; border-radius: 5px; margin-top: 20px; }
+    .summary-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-label { color: #666; }
+    .summary-value { font-weight: bold; }
+    .buttons { display: flex; gap: 10px; margin-top: 20px; }
+    button { flex: 1; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    .btn-back { background: #6c757d; color: white; }
+    .btn-submit { background: #28a745; color: white; }
+    button:hover { opacity: 0.9; }
+    .success { text-align: center; padding: 30px; display: none; }
+    .success h2 { color: #28a745; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Setup Wizard</h1>
+
+  <div class="progress">
+    <div class="step completed">1. Personal Info</div>
+    <div class="step completed">2. Preferences</div>
+    <div class="step active">3. Confirm</div>
+  </div>
+
+  <div id="confirmView">
+    <h2>Step 3: Confirm Your Details</h2>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="buttons">
+      <button type="button" class="btn-back" onclick="goBack()">Back</button>
+      <button type="button" class="btn-submit" onclick="submit()">Complete Setup</button>
+    </div>
+  </div>
+
+  <div class="success" id="successView">
+    <h2>Setup Complete!</h2>
+    <p>Your account has been configured successfully.</p>
+    <p>Welcome aboard, <span id="userName"></span>!</p>
+    <p style="margin-top: 20px;"><a href="/">Return to home</a></p>
+  </div>
+
+  <p style="margin-top: 30px;"><a href="/">Cancel and return home</a></p>
+
+  <script>
+    // Check if previous steps were completed
+    const savedData = JSON.parse(localStorage.getItem('wizardData') || '{}');
+    if (!savedData.firstName || !savedData.plan) {
+      window.location.href = '/wizard/step1.html';
+    }
+
+    // Display summary
+    const planNames = { free: 'Free', pro: 'Pro ($9/mo)', enterprise: 'Enterprise ($49/mo)' };
+    const notificationNames = { daily: 'Daily digest', weekly: 'Weekly summary', none: 'No notifications' };
+
+    document.getElementById('summary').innerHTML = `
+      <div class="summary-item">
+        <span class="summary-label">Name</span>
+        <span class="summary-value">${savedData.firstName} ${savedData.lastName}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Email</span>
+        <span class="summary-value">${savedData.email}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Plan</span>
+        <span class="summary-value">${planNames[savedData.plan] || savedData.plan}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Notifications</span>
+        <span class="summary-value">${notificationNames[savedData.notifications] || savedData.notifications}</span>
+      </div>
+      <div class="summary-item">
+        <span class="summary-label">Timezone</span>
+        <span class="summary-value">${savedData.timezone}</span>
+      </div>
+    `;
+
+    function goBack() {
+      window.location.href = '/wizard/step2.html';
+    }
+
+    function submit() {
+      console.log('Wizard completed:', savedData);
+
+      // Show success
+      document.getElementById('confirmView').style.display = 'none';
+      document.getElementById('successView').style.display = 'block';
+      document.getElementById('userName').textContent = savedData.firstName;
+
+      // Clear wizard data
+      localStorage.removeItem('wizardData');
+    }
+  </script>
+</body>
+</html>

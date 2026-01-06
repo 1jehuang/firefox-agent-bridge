@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Protected Page - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .protected-content { padding: 20px; background: #d4edda; border-radius: 5px; margin-top: 20px; }
+    .login-required { padding: 20px; background: #f8d7da; border-radius: 5px; margin-top: 20px; }
+    a { color: #007bff; }
+    .user-info { color: #155724; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Protected Page</h1>
+
+  <div id="content"></div>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+
+  <script>
+    const contentDiv = document.getElementById('content');
+    const loggedIn = localStorage.getItem('loggedIn') === 'true';
+    const username = localStorage.getItem('username');
+
+    if (loggedIn && username) {
+      contentDiv.innerHTML = `
+        <div class="protected-content">
+          <p>Welcome, <span class="user-info">${username}</span>!</p>
+          <p>You have successfully accessed the protected content.</p>
+          <h3>Secret Data</h3>
+          <ul>
+            <li>API Key: sk-test-1234567890</li>
+            <li>Account ID: ACC-98765</li>
+            <li>Access Level: Premium</li>
+          </ul>
+          <p><a href="#" onclick="logout()">Log out</a></p>
+        </div>
+      `;
+    } else {
+      contentDiv.innerHTML = `
+        <div class="login-required">
+          <p><strong>Access Denied</strong></p>
+          <p>You must be logged in to view this page.</p>
+          <p><a href="/login.html">Go to login page</a></p>
+        </div>
+      `;
+    }
+
+    function logout() {
+      localStorage.removeItem('loggedIn');
+      localStorage.removeItem('username');
+      window.location.reload();
+    }
+  </script>
+</body>
+</html>

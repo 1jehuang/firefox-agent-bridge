@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wizard Step 1 - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .progress { display: flex; margin: 20px 0; }
+    .step { flex: 1; text-align: center; padding: 10px; background: #e0e0e0; }
+    .step.active { background: #007bff; color: white; }
+    .step.completed { background: #28a745; color: white; }
+    label { display: block; margin-top: 15px; font-weight: bold; }
+    input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { padding: 12px 24px; margin-top: 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #0056b3; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Setup Wizard</h1>
+
+  <div class="progress">
+    <div class="step active">1. Personal Info</div>
+    <div class="step">2. Preferences</div>
+    <div class="step">3. Confirm</div>
+  </div>
+
+  <h2>Step 1: Personal Information</h2>
+
+  <form id="step1Form">
+    <label for="firstName">First Name</label>
+    <input type="text" id="firstName" name="firstName" placeholder="John" required>
+
+    <label for="lastName">Last Name</label>
+    <input type="text" id="lastName" name="lastName" placeholder="Doe" required>
+
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" placeholder="john@example.com" required>
+
+    <button type="submit">Next Step</button>
+  </form>
+
+  <p style="margin-top: 30px;"><a href="/">Cancel and return home</a></p>
+
+  <script>
+    // Load saved data if any
+    const savedData = JSON.parse(localStorage.getItem('wizardData') || '{}');
+    if (savedData.firstName) document.getElementById('firstName').value = savedData.firstName;
+    if (savedData.lastName) document.getElementById('lastName').value = savedData.lastName;
+    if (savedData.email) document.getElementById('email').value = savedData.email;
+
+    document.getElementById('step1Form').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      const data = {
+        ...savedData,
+        firstName: document.getElementById('firstName').value,
+        lastName: document.getElementById('lastName').value,
+        email: document.getElementById('email').value
+      };
+
+      localStorage.setItem('wizardData', JSON.stringify(data));
+      window.location.href = '/wizard/step2.html';
+    });
+  </script>
+</body>
+</html>

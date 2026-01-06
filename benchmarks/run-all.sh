@@ -65,3 +65,14 @@ cat > "$RESULT_FILE" << EOF
 EOF
 
 echo "✓ Done!"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Additional benchmarks available:"
+echo ""
+echo "Agent E2E benchmarks (spawns real Claude agents):"
+echo "  node benchmarks/bench-agent-e2e.js list"
+echo "  node benchmarks/bench-agent-e2e.js local    # Requires test server"
+echo "  node benchmarks/bench-agent-e2e.js external"
+echo ""
+echo "Playwright comparison:"
+echo "  ./benchmarks/run-comparison.sh              # Requires test server"

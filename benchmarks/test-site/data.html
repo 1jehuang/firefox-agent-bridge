@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Table - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+    th { background: #f5f5f5; font-weight: bold; }
+    tr:hover { background: #f9f9f9; }
+    .status-active { color: #28a745; }
+    .status-inactive { color: #dc3545; }
+    .status-pending { color: #ffc107; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Data Table</h1>
+  <p>This table contains structured data for extraction benchmarks.</p>
+
+  <table id="dataTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Email</th>
+        <th>Department</th>
+        <th>Status</th>
+        <th>Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr data-id="1">
+        <td>1</td>
+        <td>Alice Johnson</td>
+        <td>alice@example.com</td>
+        <td>Engineering</td>
+        <td class="status-active">Active</td>
+        <td>95</td>
+      </tr>
+      <tr data-id="2">
+        <td>2</td>
+        <td>Bob Smith</td>
+        <td>bob@example.com</td>
+        <td>Marketing</td>
+        <td class="status-active">Active</td>
+        <td>87</td>
+      </tr>
+      <tr data-id="3">
+        <td>3</td>
+        <td>Carol Williams</td>
+        <td>carol@example.com</td>
+        <td>Sales</td>
+        <td class="status-pending">Pending</td>
+        <td>92</td>
+      </tr>
+      <tr data-id="4">
+        <td>4</td>
+        <td>David Brown</td>
+        <td>david@example.com</td>
+        <td>Engineering</td>
+        <td class="status-inactive">Inactive</td>
+        <td>78</td>
+      </tr>
+      <tr data-id="5">
+        <td>5</td>
+        <td>Eve Davis</td>
+        <td>eve@example.com</td>
+        <td>Support</td>
+        <td class="status-active">Active</td>
+        <td>89</td>
+      </tr>
+      <tr data-id="6">
+        <td>6</td>
+        <td>Frank Miller</td>
+        <td>frank@example.com</td>
+        <td>Engineering</td>
+        <td class="status-active">Active</td>
+        <td>94</td>
+      </tr>
+      <tr data-id="7">
+        <td>7</td>
+        <td>Grace Lee</td>
+        <td>grace@example.com</td>
+        <td>Marketing</td>
+        <td class="status-pending">Pending</td>
+        <td>81</td>
+      </tr>
+      <tr data-id="8">
+        <td>8</td>
+        <td>Henry Wilson</td>
+        <td>henry@example.com</td>
+        <td>Sales</td>
+        <td class="status-active">Active</td>
+        <td>88</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+</body>
+</html>

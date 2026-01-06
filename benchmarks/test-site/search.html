@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Search - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .search-box { display: flex; gap: 10px; margin: 20px 0; }
+    input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
+    button { padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #0056b3; }
+    .results { margin-top: 30px; }
+    .result-item { padding: 15px; margin: 10px 0; background: #f9f9f9; border-radius: 5px; border-left: 3px solid #007bff; }
+    .result-title { font-weight: bold; color: #007bff; }
+    .result-url { color: #006621; font-size: 14px; }
+    .result-desc { color: #666; margin-top: 5px; }
+    .no-results { color: #666; font-style: italic; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Search</h1>
+
+  <form id="searchForm" class="search-box">
+    <input type="text" id="query" name="q" placeholder="Enter search query..." required>
+    <button type="submit">Search</button>
+  </form>
+
+  <div id="results" class="results"></div>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+
+  <script>
+    const mockResults = [
+      { title: 'Firefox Agent Bridge Documentation', url: 'https://example.com/docs', desc: 'Complete documentation for the Firefox Agent Bridge project including setup, API reference, and examples.' },
+      { title: 'Browser Automation Best Practices', url: 'https://example.com/best-practices', desc: 'Learn the best practices for browser automation including element selection, waiting strategies, and error handling.' },
+      { title: 'WebSocket API Reference', url: 'https://example.com/websocket', desc: 'Technical reference for the WebSocket API used to communicate between agents and the browser extension.' },
+      { title: 'Benchmark Results Analysis', url: 'https://example.com/benchmarks', desc: 'Detailed analysis of performance benchmarks comparing different browser automation approaches.' },
+      { title: 'Getting Started Guide', url: 'https://example.com/getting-started', desc: 'Step-by-step guide to get started with Firefox Agent Bridge in under 5 minutes.' }
+    ];
+
+    document.getElementById('searchForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const query = document.getElementById('query').value.trim().toLowerCase();
+      const resultsDiv = document.getElementById('results');
+
+      if (!query) {
+        resultsDiv.innerHTML = '<p class="no-results">Please enter a search query.</p>';
+        return;
+      }
+
+      // Filter results based on query
+      const filtered = mockResults.filter(r =>
+        r.title.toLowerCase().includes(query) ||
+        r.desc.toLowerCase().includes(query)
+      );
+
+      if (filtered.length === 0) {
+        resultsDiv.innerHTML = `<p class="no-results">No results found for "${query}".</p>`;
+        return;
+      }
+
+      resultsDiv.innerHTML = `<p>Found ${filtered.length} results for "${query}":</p>` +
+        filtered.map((r, i) => `
+          <div class="result-item" data-index="${i}">
+            <div class="result-title">${r.title}</div>
+            <div class="result-url">${r.url}</div>
+            <div class="result-desc">${r.desc}</div>
+          </div>
+        `).join('');
+    });
+  </script>
+</body>
+</html>

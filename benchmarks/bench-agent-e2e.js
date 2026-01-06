@@ -7,7 +7,11 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
 
+// Test server URL (start with: node benchmarks/test-server.js)
+const TEST_SERVER = process.env.TEST_SERVER || 'http://localhost:3456';
+
 const TASKS = {
+  // === External site tasks (original) ===
   'search-duckduckgo': {
     prompt: `Using the firefox-browser skill, search DuckDuckGo for "weather in seattle" and return the first 3 results. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'getContent']
@@ -19,8 +23,57 @@ const TASKS = {
   'multi-site-fetch': {
     prompt: `Using the firefox-browser skill, get the page titles from these 3 sites: example.com, httpbin.org, duckduckgo.com. Use parallel if possible. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
     expectedActions: ['parallel']
+  },
+
+  // === Local test site tasks ===
+  'login-flow': {
+    prompt: `Using the firefox-browser skill, log into the test site at ${TEST_SERVER}/login.html. Use username "testuser" and password "secret123". After login, verify you see the protected content. Report what secret data is shown. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    requiresTestServer: true
+  },
+  'search-extract': {
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/search.html, search for "documentation", and extract the titles of all results found. Return the results as a list. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'type', 'getContent'],
+    requiresTestServer: true
+  },
+  'contact-form': {
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/contact.html and fill out the contact form with: Name="John Doe", Email="john@example.com", Phone="555-123-4567", Subject="Technical Support", Message="This is a test message". Check the newsletter checkbox. Submit the form and confirm success. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'fillForm', 'click', 'getContent'],
+    requiresTestServer: true
+  },
+  'wizard-complete': {
+    prompt: `Using the firefox-browser skill, complete the 3-step wizard at ${TEST_SERVER}/wizard/step1.html. Step 1: Enter First Name="Jane", Last Name="Smith", Email="jane@example.com". Step 2: Select Plan="Pro", Notifications="Weekly", Timezone="Pacific Time". Step 3: Confirm and complete. Report the final success message. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    requiresTestServer: true
+  },
+  'table-scrape': {
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/data.html and extract all rows from the data table. Return a JSON array with each row containing: ID, Name, Email, Department, Status, Score. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'getContent'],
+    requiresTestServer: true
+  },
+  'protected-access': {
+    prompt: `Using the firefox-browser skill, first log into ${TEST_SERVER}/login.html with any username/password, then navigate to the protected page and extract the secret API key and Account ID. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    requiresTestServer: true
   }
 };
+
+async function checkTestServer() {
+  return new Promise((resolve) => {
+    const http = require('http');
+    const url = new URL(TEST_SERVER);
+    const req = http.get({
+      hostname: url.hostname,
+      port: url.port,
+      path: '/api/health',
+      timeout: 2000
+    }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
 
 async function runAgentTask(taskName) {
   const task = TASKS[taskName];
@@ -28,6 +81,17 @@ async function runAgentTask(taskName) {
     console.error(`Unknown task: ${taskName}`);
     console.log('Available:', Object.keys(TASKS).join(', '));
     process.exit(1);
+  }
+
+  // Check if test server is required and running
+  if (task.requiresTestServer) {
+    const serverUp = await checkTestServer();
+    if (!serverUp) {
+      console.error(`\n❌ Task "${taskName}" requires the test server.`);
+      console.error(`   Start it with: node benchmarks/test-server.js`);
+      console.error(`   Or: ./benchmarks/start-test-server.sh`);
+      process.exit(1);
+    }
   }
 
   console.log(`\n📊 E2E Benchmark: ${taskName}`);
@@ -123,11 +187,59 @@ async function runAgentTask(taskName) {
 }
 
 async function main() {
-  const taskName = process.argv[2] || 'search-duckduckgo';
+  const taskName = process.argv[2] || 'list';
+
+  if (taskName === 'list' || taskName === '--help' || taskName === '-h') {
+    console.log('Agent E2E Benchmark\n');
+    console.log('Usage: node bench-agent-e2e.js <task|command>\n');
+    console.log('Commands:');
+    console.log('  list     - Show available tasks (default)');
+    console.log('  all      - Run all tasks');
+    console.log('  local    - Run only local test site tasks');
+    console.log('  external - Run only external site tasks\n');
+    console.log('Tasks:');
+    for (const [name, task] of Object.entries(TASKS)) {
+      const marker = task.requiresTestServer ? '(local)' : '(external)';
+      console.log(`  ${name} ${marker}`);
+    }
+    console.log('\nNote: Local tasks require the test server running.');
+    console.log('Start with: node benchmarks/test-server.js');
+    return;
+  }
 
   if (taskName === 'all') {
     for (const name of Object.keys(TASKS)) {
-      await runAgentTask(name);
+      try {
+        await runAgentTask(name);
+      } catch (err) {
+        console.error(`Task ${name} failed:`, err.message);
+      }
+      console.log('\n');
+    }
+  } else if (taskName === 'local') {
+    const localTasks = Object.entries(TASKS)
+      .filter(([_, t]) => t.requiresTestServer)
+      .map(([name]) => name);
+    console.log(`Running ${localTasks.length} local tasks...\n`);
+    for (const name of localTasks) {
+      try {
+        await runAgentTask(name);
+      } catch (err) {
+        console.error(`Task ${name} failed:`, err.message);
+      }
+      console.log('\n');
+    }
+  } else if (taskName === 'external') {
+    const externalTasks = Object.entries(TASKS)
+      .filter(([_, t]) => !t.requiresTestServer)
+      .map(([name]) => name);
+    console.log(`Running ${externalTasks.length} external tasks...\n`);
+    for (const name of externalTasks) {
+      try {
+        await runAgentTask(name);
+      } catch (err) {
+        console.error(`Task ${name} failed:`, err.message);
+      }
       console.log('\n');
     }
   } else {

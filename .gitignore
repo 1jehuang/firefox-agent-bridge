@@ -14,3 +14,7 @@ web-ext-artifacts/
 
 # Local config
 .env
+
+# Build artifacts
+*.xpi
+logs/

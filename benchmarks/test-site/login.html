@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 400px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    form { margin-top: 20px; }
+    label { display: block; margin-top: 15px; font-weight: bold; }
+    input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; margin-top: 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #0056b3; }
+    .error { color: red; margin-top: 10px; display: none; }
+    .success { color: green; margin-top: 10px; display: none; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Login</h1>
+  <p>Enter any non-empty username and password to log in.</p>
+
+  <form id="loginForm">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" placeholder="Enter username" required>
+
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" placeholder="Enter password" required>
+
+    <button type="submit">Log In</button>
+  </form>
+
+  <p class="error" id="error">Please fill in both fields.</p>
+  <p class="success" id="success">Login successful! Redirecting...</p>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      document.getElementById('error').style.display = 'none';
+      document.getElementById('success').style.display = 'none';
+
+      if (!username || !password) {
+        document.getElementById('error').style.display = 'block';
+        return;
+      }
+
+      // Store login state
+      localStorage.setItem('loggedIn', 'true');
+      localStorage.setItem('username', username);
+
+      document.getElementById('success').style.display = 'block';
+      setTimeout(() => {
+        window.location.href = '/protected.html';
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact Form - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    form { margin-top: 20px; }
+    label { display: block; margin-top: 15px; font-weight: bold; }
+    input, select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit; }
+    textarea { min-height: 100px; resize: vertical; }
+    .checkbox-group { margin-top: 15px; }
+    .checkbox-group label { display: flex; align-items: center; font-weight: normal; margin-top: 8px; }
+    .checkbox-group input { width: auto; margin-right: 10px; }
+    button { width: 100%; padding: 12px; margin-top: 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+    button:hover { background: #218838; }
+    .success { color: green; margin-top: 15px; padding: 15px; background: #d4edda; border-radius: 4px; display: none; }
+    a { color: #007bff; }
+  </style>
+</head>
+<body>
+  <h1>Contact Form</h1>
+  <p>Fill out the form below. All fields are required for testing purposes.</p>
+
+  <form id="contactForm">
+    <label for="name">Full Name</label>
+    <input type="text" id="name" name="name" placeholder="John Doe" required>
+
+    <label for="email">Email Address</label>
+    <input type="email" id="email" name="email" placeholder="john@example.com" required>
+
+    <label for="phone">Phone Number</label>
+    <input type="tel" id="phone" name="phone" placeholder="555-123-4567" required>
+
+    <label for="subject">Subject</label>
+    <select id="subject" name="subject" required>
+      <option value="">Select a subject...</option>
+      <option value="general">General Inquiry</option>
+      <option value="support">Technical Support</option>
+      <option value="feedback">Feedback</option>
+      <option value="other">Other</option>
+    </select>
+
+    <label for="message">Message</label>
+    <textarea id="message" name="message" placeholder="Enter your message here..." required></textarea>
+
+    <div class="checkbox-group">
+      <strong>Preferences</strong>
+      <label>
+        <input type="checkbox" id="newsletter" name="newsletter">
+        Subscribe to newsletter
+      </label>
+      <label>
+        <input type="checkbox" id="updates" name="updates">
+        Receive product updates
+      </label>
+    </div>
+
+    <button type="submit">Submit</button>
+  </form>
+
+  <div class="success" id="success">
+    <strong>Form submitted successfully!</strong><br>
+    Thank you for your message. We'll get back to you soon.
+  </div>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+
+  <script>
+    document.getElementById('contactForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      // Gather form data
+      const formData = {
+        name: document.getElementById('name').value,
+        email: document.getElementById('email').value,
+        phone: document.getElementById('phone').value,
+        subject: document.getElementById('subject').value,
+        message: document.getElementById('message').value,
+        newsletter: document.getElementById('newsletter').checked,
+        updates: document.getElementById('updates').checked
+      };
+
+      console.log('Form submitted:', formData);
+
+      // Show success message
+      document.getElementById('contactForm').style.display = 'none';
+      document.getElementById('success').style.display = 'block';
+    });
+  </script>
+</body>
+</html>
