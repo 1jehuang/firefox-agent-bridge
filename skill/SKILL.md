@@ -1,48 +1,193 @@
 ---
 name: firefox-browser
-description: Control the user's Firefox browser with their logins and cookies intact. Use when you need to browse websites as the user, interact with authenticated pages, fill forms, click buttons, take screenshots, or get page content.
+description: Control the user's Firefox browser with their logins and cookies intact. Use when you need to browse websites as the user, interact with authenticated pages, fill forms, click buttons, take screenshots, or get page content. (user)
 allowed-tools: Bash, Read, Write
 ---
 
-# Firefox Browser Automation Skill
+# Firefox Browser Agent Bridge
 
-This skill enables browser automation through Firefox using the user's actual browser session with their logins and cookies.
+Control the user's actual Firefox browser session via WebSocket. This uses their real browser with existing logins and cookies - **not** a headless browser.
 
-## Prerequisites
+## Quick Start
 
-The Firefox MCP server should be running. If not available, use Playwright MCP as a fallback.
+```bash
+# Verify connection
+node ~/.claude/skills/firefox-browser/client.js ping
 
-## Capabilities
+# Navigate and get page elements in one call
+node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://example.com", "returnInteractables": true}'
 
-1. **Navigate** - Go to URLs in the user's Firefox
-2. **Screenshot** - Capture the current page
-3. **Click** - Click elements on the page
-4. **Type** - Enter text into form fields
-5. **Scroll** - Scroll the page
-6. **Get Content** - Extract text or HTML from the page
+# Get page text
+node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "text"}'
+```
 
-## Usage Pattern
+## Client Usage
 
-When the user asks to interact with a website:
+```bash
+node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
+```
 
-1. First check if the Firefox MCP tools are available
-2. Use `browser_navigate` to go to URLs
-3. Use `browser_snapshot` to understand page structure
-4. Use `browser_click`, `browser_type` for interactions
-5. Use `browser_take_screenshot` to show the user what happened
+## Actions Reference
 
-## Example Workflow
+### Navigation & Page Info
 
-User: "Log into my GitHub and star a repo"
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `navigate` | Go to URL | `url`, `wait`, `newTab`, `returnInteractables` |
+| `getActiveTab` | Get current tab info | - |
+| `getContent` | Get page content | `format`: `text`, `textFast`, `html`, `title` |
+| `getInteractables` | List clickable elements and inputs | `selector` (optional scope) |
+| `screenshot` | Capture visible area as PNG | `filename` (optional) |
 
-1. Navigate to github.com
-2. Take snapshot to see current state
-3. If logged in, proceed to the repo
-4. Click the star button
-5. Confirm with screenshot
+### Interaction
 
-## Notes
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `click` | Click element | `selector`, `text`, or `x`/`y` coords |
+| `type` | Type into input | `selector`, `text`, `submit`, `clear`, `append` |
+| `fillForm` | Fill multiple fields | `fields[]` with selector/value pairs |
+| `waitFor` | Wait for element/text | `selector`, `text`, or `contains`; `timeout` |
 
-- The user's existing Firefox session is used, so they're already logged into their accounts
-- Be careful with sensitive actions - confirm before submitting forms
-- Use snapshots over screenshots when you need to interact with elements
+### Advanced
+
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `batch` | Run commands sequentially | `commands[]`, `stopOnError` |
+| `parallel` | Run commands on multiple pages | `branches[]` with url + commands |
+| `branch` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
+| `scout` | Explore site structure | `url`, `goal`, `depth`, `maxPages` |
+
+## Common Patterns
+
+### 1. Navigate and Understand Page (Recommended First Step)
+
+```bash
+# Get page with interactive elements in one call
+node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://site.com", "returnInteractables": true}'
+```
+
+Returns: `{tabId, url, interactables: {elements: [...]}}`
+
+### 2. Search a Website
+
+```bash
+# Navigate
+node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://duckduckgo.com"}'
+
+# Type and submit
+node ~/.claude/skills/firefox-browser/client.js type '{"selector": "input[name=q]", "text": "search query", "submit": true}'
+
+# Wait for results
+node ~/.claude/skills/firefox-browser/client.js waitFor '{"contains": "results", "timeout": 10000}'
+
+# Get content
+node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "text"}'
+```
+
+### 3. Click Elements
+
+```bash
+# By CSS selector
+node ~/.claude/skills/firefox-browser/client.js click '{"selector": "button.submit"}'
+
+# By visible text
+node ~/.claude/skills/firefox-browser/client.js click '{"text": "Sign In"}'
+
+# By coordinates (for tricky elements)
+node ~/.claude/skills/firefox-browser/client.js click '{"x": 100, "y": 200}'
+```
+
+### 4. Fill a Form
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js fillForm '{"fields": [
+  {"selector": "#email", "value": "user@example.com"},
+  {"selector": "#password", "value": "secret"},
+  {"selector": "#remember", "checked": true}
+]}'
+```
+
+### 5. Fetch Multiple Pages in Parallel
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js parallel '{"branches": [
+  {"url": "https://site1.com", "commands": [{"action": "getContent", "params": {"format": "title"}}]},
+  {"url": "https://site2.com", "commands": [{"action": "getContent", "params": {"format": "title"}}]}
+]}'
+```
+
+### 6. Handle Uncertain UI (Try Alternatives)
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js branch '{"alternatives": [
+  {"action": "click", "params": {"selector": "#accept-cookies"}},
+  {"action": "click", "params": {"text": "Accept"}},
+  {"action": "click", "params": {"selector": ".cookie-banner button"}}
+], "timeout": 3000}'
+```
+
+### 7. Take Screenshot
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js screenshot '{}'
+# Saves to /tmp/firefox-screenshot-<timestamp>.png
+
+node ~/.claude/skills/firefox-browser/client.js screenshot '{"filename": "/tmp/my-screenshot.png"}'
+```
+
+## Using getInteractables
+
+The `getInteractables` action returns all clickable elements and form inputs. Use this to understand page structure:
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js getInteractables '{}'
+```
+
+Returns:
+```json
+{
+  "url": "https://example.com",
+  "title": "Page Title",
+  "elements": [
+    {"type": "clickable", "tag": "A", "text": "Link Text", "selector": "#link-id", "rect": {...}},
+    {"type": "input", "tag": "INPUT", "inputType": "text", "name": "email", "selector": "#email", "label": "Email"}
+  ]
+}
+```
+
+## Macros (Pre-built Workflows)
+
+Run common multi-step tasks with one command:
+
+```bash
+# List available macros
+node ~/.claude/skills/firefox-browser/macro.js
+
+# Search DuckDuckGo
+node ~/.claude/skills/firefox-browser/macro.js "search duckduckgo for weather in seattle"
+
+# Search Google
+node ~/.claude/skills/firefox-browser/macro.js "search google for best restaurants"
+
+# Get page content
+node ~/.claude/skills/firefox-browser/macro.js "get the content of https://example.com"
+```
+
+## Tips
+
+1. **Always start with `navigate` + `returnInteractables: true`** - saves a round trip
+2. **Use `textFast` format** when you just need raw text quickly
+3. **Use `text` for finding elements** when CSS selectors are unreliable
+4. **Use `batch`** to combine multiple commands into one request
+5. **Use `parallel`** to fetch from multiple pages simultaneously
+6. **Use `branch`** when the UI might vary (cookie banners, A/B tests)
+7. **Screenshots save to `/tmp/`** by default - use Read tool to view them
+
+## Troubleshooting
+
+If commands fail:
+
+1. **Check connection**: `node ~/.claude/skills/firefox-browser/client.js ping`
+2. **Verify Firefox is running** with the Browser Agent Bridge extension loaded
+3. **Check `about:debugging`** in Firefox for extension errors
+4. **Element not found?** Use `getInteractables` to see what's actually on the page
