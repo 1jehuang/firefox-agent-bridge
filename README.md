@@ -76,7 +76,7 @@ browser --timing navigate '{"url": "http://example.com"}'
 | click | 2-5 | 0 | 2-5 |
 | fillForm | 3-10 | 0 | 3-10 |
 
-### E2E Agent Benchmark Results
+### E2E Agent Benchmark Results (Claude Code + Sonnet)
 
 | Task | Status | Commands | Total Time | Cmd Execution | Description |
 |------|--------|----------|------------|---------------|-------------|
@@ -84,6 +84,8 @@ browser --timing navigate '{"url": "http://example.com"}'
 | oauth-flow | PASS | ~20 | ~45s | ~3s | Complete mock Google OAuth |
 | contact-form | PASS | 9 | ~20s | ~1s | Fill and submit form |
 | login-flow | PASS | 6 | ~15s | ~0.8s | Login and extract secrets |
+
+*Tested with Claude Code (claude-sonnet-4-20250514)*
 
 **Timing breakdown:**
 - **Total Time** = LLM thinking + command execution (dominated by LLM API latency)
