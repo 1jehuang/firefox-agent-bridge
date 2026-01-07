@@ -11,23 +11,26 @@ Control the user's actual Firefox browser session via WebSocket. This uses their
 ## Quick Start
 
 ```bash
+# 0. If Firefox isn't running, start it first
+nohup firefox &>/dev/null &
+
 # 1. Check connection
-node ~/.claude/skills/firefox-browser/client.js ping
+browser ping
 
 # 2. See what tabs are open
-node ~/.claude/skills/firefox-browser/client.js listTabs '{}'
+browser listTabs '{}'
 
 # 3. Start a new session (recommended)
-node ~/.claude/skills/firefox-browser/client.js newSession '{"url": "https://example.com"}'
+browser newSession '{"url": "https://example.com"}'
 
 # 4. Read the page with interactable elements marked
-node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated"}'
+browser getContent '{"format": "annotated"}'
 ```
 
 ## Client Usage
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
+browser <action> '<json_params>'
 ```
 
 ## Actions Reference
@@ -84,7 +87,7 @@ node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
 ### 1. Start by Inspecting Available Tabs
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js listTabs '{}'
+browser listTabs '{}'
 ```
 
 Returns:
@@ -108,16 +111,16 @@ Returns:
 
 ```bash
 # Start fresh
-node ~/.claude/skills/firefox-browser/client.js newSession '{"url": "https://amazon.com"}'
+browser newSession '{"url": "https://amazon.com"}'
 
 # Or switch to existing tab
-node ~/.claude/skills/firefox-browser/client.js setActiveTab '{"tabId": 456}'
+browser setActiveTab '{"tabId": 456}'
 ```
 
 ### 3. Read Page with Annotated Format (Recommended)
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated"}'
+browser getContent '{"format": "annotated"}'
 ```
 
 Returns content with interactive elements marked inline:
@@ -135,13 +138,13 @@ This shows **what's clickable** and **where it is in context**.
 
 ```bash
 # Click using selector from annotated output
-node ~/.claude/skills/firefox-browser/client.js click '{"selector": "#add-btn"}'
+browser click '{"selector": "#add-btn"}'
 
 # Or by text (prefers visible elements)
-node ~/.claude/skills/firefox-browser/client.js click '{"text": "Add to cart"}'
+browser click '{"text": "Add to cart"}'
 
 # Type into input
-node ~/.claude/skills/firefox-browser/client.js type '{"selector": "#search-box", "text": "query", "submit": true}'
+browser type '{"selector": "#search-box", "text": "query", "submit": true}'
 ```
 
 ---
@@ -152,7 +155,7 @@ When you're not sure which path is right, fork the tab and try both:
 
 ```bash
 # Create forks
-node ~/.claude/skills/firefox-browser/client.js fork '{
+browser fork '{
   "paths": [
     {
       "name": "google-auth",
@@ -180,13 +183,13 @@ Returns:
 
 Work on specific fork:
 ```bash
-node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated", "fork": "google-auth"}'
-node ~/.claude/skills/firefox-browser/client.js click '{"text": "Continue", "fork": "google-auth"}'
+browser getContent '{"format": "annotated", "fork": "google-auth"}'
+browser click '{"text": "Continue", "fork": "google-auth"}'
 ```
 
 Kill the wrong path:
 ```bash
-node ~/.claude/skills/firefox-browser/client.js killFork '{"fork": "email-auth"}'
+browser killFork '{"fork": "email-auth"}'
 ```
 
 ---
@@ -196,7 +199,7 @@ node ~/.claude/skills/firefox-browser/client.js killFork '{"fork": "email-auth"}
 When the exact button varies (cookie banners, A/B tests):
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js tryUntil '{
+browser tryUntil '{
   "alternatives": [
     {"action": "click", "params": {"selector": "#accept-cookies"}},
     {"action": "click", "params": {"text": "Accept All"}},
@@ -215,7 +218,7 @@ Tries each until one succeeds.
 Compare prices across sites:
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js parallel '{
+browser parallel '{
   "branches": [
     {"url": "https://amazon.com/product", "commands": [{"action": "getContent", "params": {"format": "text"}}]},
     {"url": "https://walmart.com/product", "commands": [{"action": "getContent", "params": {"format": "text"}}]}
@@ -231,7 +234,7 @@ The bridge detects auth pages and leverages existing browser sessions:
 
 ```bash
 # Check if on login page
-node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
+browser getAuthContext '{}'
 
 # Returns available accounts, OAuth options, etc.
 ```
@@ -248,7 +251,7 @@ node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
 
 ## Troubleshooting
 
-1. **Check connection**: `client.js ping`
-2. **Verify Firefox is running** with Browser Agent Bridge extension
-3. **Check `about:debugging`** in Firefox for extension errors
-4. **Element not found?** Use `getContent '{"format": "annotated"}'` to see what's on the page
+1. **Firefox not running?** Start it: `nohup firefox &>/dev/null &`
+2. **Check connection**: `browser ping`
+3. **Connection refused?** The extension may need to be reloaded in `about:debugging`
+4. **Element not found?** Use `browser getContent '{"format": "annotated"}'` to see what's on the page

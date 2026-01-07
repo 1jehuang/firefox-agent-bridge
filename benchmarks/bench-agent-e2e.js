@@ -13,46 +13,46 @@ const TEST_SERVER = process.env.TEST_SERVER || 'http://localhost:3456';
 const TASKS = {
   // === External site tasks (original) ===
   'search-duckduckgo': {
-    prompt: `Using the firefox-browser skill, search DuckDuckGo for "weather in seattle" and return the first 3 results. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, search DuckDuckGo for "weather in seattle" and return the first 3 results. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'getContent']
   },
   'find-complaint-form': {
-    prompt: `Using the firefox-browser skill, go to https://brightairindustries.com/?audience=community, find the "File a complaint" page, and list the form fields. Use scout first if available. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, go to https://brightairindustries.com/?audience=community, find the "File a complaint" page, and list the form fields. Use scout first if available. Use: browser <action> '<json>'`,
     expectedActions: ['scout', 'navigate', 'click', 'getInteractables']
   },
   'multi-site-fetch': {
-    prompt: `Using the firefox-browser skill, get the page titles from these 3 sites: example.com, httpbin.org, duckduckgo.com. Use parallel if possible. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, get the page titles from these 3 sites: example.com, httpbin.org, duckduckgo.com. Use parallel if possible. Use: browser <action> '<json>'`,
     expectedActions: ['parallel']
   },
 
   // === Local test site tasks ===
   'login-flow': {
-    prompt: `Using the firefox-browser skill, log into the test site at ${TEST_SERVER}/login.html. Use username "testuser" and password "secret123". After login, verify you see the protected content. Report what secret data is shown. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, log into the test site at ${TEST_SERVER}/login.html. Use username "testuser" and password "secret123". After login, verify you see the protected content. Report what secret data is shown. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'click', 'getContent'],
     requiresTestServer: true
   },
   'search-extract': {
-    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/search.html, search for "documentation", and extract the titles of all results found. Return the results as a list. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/search.html, search for "documentation", and extract the titles of all results found. Return the results as a list. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'getContent'],
     requiresTestServer: true
   },
   'contact-form': {
-    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/contact.html and fill out the contact form with: Name="John Doe", Email="john@example.com", Phone="555-123-4567", Subject="Technical Support", Message="This is a test message". Check the newsletter checkbox. Submit the form and confirm success. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/contact.html and fill out the contact form with: Name="John Doe", Email="john@example.com", Phone="555-123-4567", Subject="Technical Support", Message="This is a test message". Check the newsletter checkbox. Submit the form and confirm success. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'fillForm', 'click', 'getContent'],
     requiresTestServer: true
   },
   'wizard-complete': {
-    prompt: `Using the firefox-browser skill, complete the 3-step wizard at ${TEST_SERVER}/wizard/step1.html. Step 1: Enter First Name="Jane", Last Name="Smith", Email="jane@example.com". Step 2: Select Plan="Pro", Notifications="Weekly", Timezone="Pacific Time". Step 3: Confirm and complete. Report the final success message. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, complete the 3-step wizard at ${TEST_SERVER}/wizard/step1.html. Step 1: Enter First Name="Jane", Last Name="Smith", Email="jane@example.com". Step 2: Select Plan="Pro", Notifications="Weekly", Timezone="Pacific Time". Step 3: Confirm and complete. Report the final success message. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'click', 'getContent'],
     requiresTestServer: true
   },
   'table-scrape': {
-    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/data.html and extract all rows from the data table. Return a JSON array with each row containing: ID, Name, Email, Department, Status, Score. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/data.html and extract all rows from the data table. Return a JSON array with each row containing: ID, Name, Email, Department, Status, Score. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'getContent'],
     requiresTestServer: true
   },
   'protected-access': {
-    prompt: `Using the firefox-browser skill, first log into ${TEST_SERVER}/login.html with any username/password, then navigate to the protected page and extract the secret API key and Account ID. Use: node ~/.claude/skills/firefox-browser/client.js <action> '<json>'`,
+    prompt: `Using the firefox-browser skill, first log into ${TEST_SERVER}/login.html with any username/password, then navigate to the protected page and extract the secret API key and Account ID. Use: browser <action> '<json>'`,
     expectedActions: ['navigate', 'type', 'click', 'getContent'],
     requiresTestServer: true
   }
@@ -126,8 +126,8 @@ async function runAgentTask(taskName) {
       const text = data.toString();
       output += text;
 
-      // Detect command execution (look for client.js calls)
-      const cmdMatches = text.match(/node.*client\.js\s+(\w+)/g);
+      // Detect command execution (look for browser calls)
+      const cmdMatches = text.match(/browser\s+(\w+)/g);
       if (cmdMatches) {
         cmdMatches.forEach(cmd => {
           const now = Date.now();
@@ -136,7 +136,7 @@ async function runAgentTask(taskName) {
           metrics.commandCount++;
           metrics.events.push({
             type: 'command',
-            action: cmd.match(/client\.js\s+(\w+)/)?.[1],
+            action: cmd.match(/browser\s+(\w+)/)?.[1],
             thinkTimeMs: thinkTime,
             timestamp: now - startTime
           });

@@ -1,0 +1,10 @@
+{
+  "task": "login-flow",
+  "startTime": 1767792766592,
+  "agentThinkingMs": 0,
+  "commandExecutionMs": 180027,
+  "commandCount": 0,
+  "turns": 0,
+  "events": [],
+  "totalMs": 180027
+}
