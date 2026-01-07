@@ -688,7 +688,21 @@ async function listAllTabs() {
 // Create a new session (new tab)
 async function newSession(params) {
   const url = params?.url || "about:blank";
-  const tab = await browser.tabs.create({ url, active: true });
+  const sandbox = params?.sandbox === true;
+  let tab;
+
+  if (sandbox) {
+    // Create a private (incognito) window for sandbox mode
+    // This gives us a clean slate: no cookies, no logins, no cache
+    const privateWindow = await browser.windows.create({
+      url,
+      incognito: true,
+      focused: true
+    });
+    tab = privateWindow.tabs[0];
+  } else {
+    tab = await browser.tabs.create({ url, active: true });
+  }
 
   if (url !== "about:blank" && params?.wait !== false) {
     await waitForTabComplete(tab.id, params?.timeoutMs || 15000);
@@ -701,7 +715,8 @@ async function newSession(params) {
     tabId: tab.id,
     windowId: tab.windowId,
     url: tab.url,
-    title: tab.title
+    title: tab.title,
+    sandbox
   };
 
   // Return content by default (or if explicitly requested)
