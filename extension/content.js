@@ -7,6 +7,19 @@ function textIncludes(haystack, needleLower) {
   return haystack && needleLower && haystack.toLowerCase().includes(needleLower);
 }
 
+function isElementVisible(el) {
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  // Must have non-zero dimensions
+  if (rect.width === 0 || rect.height === 0) return false;
+  // Must be within viewport (or at least partially)
+  if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
+  // Check computed style
+  const style = window.getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+  return true;
+}
+
 function findByText(text) {
   if (!text) return null;
   const needleLower = text.toLowerCase();
@@ -14,13 +27,18 @@ function findByText(text) {
   if (!root) return null;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node = walker.nextNode();
+  let fallback = null; // Store first match as fallback
   while (node) {
     if (textIncludes(node.nodeValue, needleLower)) {
-      return node.parentElement || node.parentNode;
+      const el = node.parentElement || node.parentNode;
+      if (isElementVisible(el)) {
+        return el; // Return first VISIBLE match
+      }
+      if (!fallback) fallback = el; // Keep first match as fallback
     }
     node = walker.nextNode();
   }
-  return null;
+  return fallback; // Return fallback if no visible match found
 }
 
 function resolveElement(params) {
