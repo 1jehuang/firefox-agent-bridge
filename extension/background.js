@@ -6,6 +6,9 @@ let reconnectTimer = null;
 let cachedActiveTabId = null;
 let cachedWindowId = null;
 
+// Fork tracking
+const activeForks = new Map(); // forkName -> {tabId, createdAt, parentTabId}
+
 // AI control tracking
 let isConnected = false;
 let activeRequests = 0;
@@ -256,43 +259,77 @@ function sendNative(payload) {
 }
 
 async function dispatchAction(action, params, profile) {
+  // Handle fork targeting - if params.fork is set, resolve to that fork's tabId
+  if (params && params.fork && activeForks.has(params.fork)) {
+    params = { ...params, tabId: activeForks.get(params.fork).tabId };
+  }
+
   switch (action) {
     case "ping":
       return { pong: true, time: Date.now() };
+
+    // Session/Tab Management
+    case "listTabs":
+      return listAllTabs();
+    case "newSession":
+      return newSession(params);
+    case "setActiveTab":
+      return setActiveTab(params);
+    case "getActiveTab":
+      return getActiveTabInfo();
+
+    // Navigation
     case "navigate":
       return navigateTo(params);
+
+    // Interaction
     case "click":
       return sendToContent("click", params, profile);
     case "type":
       return sendToContent("type", params, profile);
-    case "getContent":
-      return sendToContent("getContent", params, profile);
-    case "waitFor":
-      return sendToContent("waitFor", params, profile);
     case "fillForm":
       return sendToContent("fillForm", params, profile);
-    case "branch":
-      return sendToContent("branch", params, profile);
+    case "waitFor":
+      return sendToContent("waitFor", params, profile);
+
+    // Page Content
+    case "getContent":
+      return sendToContent("getContent", params, profile);
     case "getInteractables":
       return sendToContent("getInteractables", params, profile);
     case "preexplore":
       return sendToContent("preexplore", params, profile);
-    case "scout":
-      return executeScout(params, profile);
     case "screenshot":
       return captureScreenshot(params);
-    case "getActiveTab":
-      return getActiveTabInfo();
-    case "batch":
-      return executeBatch(params, profile);
+
+    // Control Flow
+    case "tryUntil":
+      return sendToContent("tryUntil", params, profile);
+    case "fork":
+      return executeFork(params, profile);
+    case "killFork":
+      return killFork(params);
+    case "listForks":
+      return listForks();
     case "parallel":
       return executeParallel(params, profile);
+    case "scout":
+      return executeScout(params, profile);
+
+    // Auth
     case "getAuthContext":
       return getAuthContext(params, profile);
     case "configureAuth":
       return configureAuth(params);
     case "requestAuth":
       return requestAuth(params);
+
+    // Legacy (keeping for backwards compat)
+    case "batch":
+      return executeBatch(params, profile);
+    case "branch":
+      return sendToContent("tryUntil", params, profile); // Alias to tryUntil
+
     default:
       throw new Error(`Unknown action: ${action}`);
   }
@@ -613,6 +650,194 @@ async function getActiveTabInfo() {
   const tabId = await resolveTabId({});
   const tab = await browser.tabs.get(tabId);
   return { tabId: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId };
+}
+
+// List all open tabs across all windows
+async function listAllTabs() {
+  const tabs = await browser.tabs.query({});
+  const windows = await browser.windows.getAll();
+
+  const tabsByWindow = {};
+  for (const win of windows) {
+    tabsByWindow[win.id] = {
+      windowId: win.id,
+      focused: win.focused,
+      tabs: []
+    };
+  }
+
+  for (const tab of tabs) {
+    if (tabsByWindow[tab.windowId]) {
+      tabsByWindow[tab.windowId].tabs.push({
+        tabId: tab.id,
+        url: tab.url,
+        title: tab.title,
+        active: tab.active,
+        index: tab.index
+      });
+    }
+  }
+
+  return {
+    activeTabId: cachedActiveTabId,
+    windows: Object.values(tabsByWindow),
+    totalTabs: tabs.length
+  };
+}
+
+// Create a new session (new tab)
+async function newSession(params) {
+  const url = params?.url || "about:blank";
+  const tab = await browser.tabs.create({ url, active: true });
+
+  if (url !== "about:blank" && params?.wait !== false) {
+    await waitForTabComplete(tab.id, params?.timeoutMs || 15000);
+  }
+
+  cachedActiveTabId = tab.id;
+  cachedWindowId = tab.windowId;
+
+  return {
+    tabId: tab.id,
+    windowId: tab.windowId,
+    url: tab.url,
+    title: tab.title
+  };
+}
+
+// Set which tab the agent is working on
+async function setActiveTab(params) {
+  if (!params?.tabId) throw new Error("setActiveTab requires tabId");
+
+  const tab = await browser.tabs.get(params.tabId);
+  cachedActiveTabId = tab.id;
+  cachedWindowId = tab.windowId;
+
+  // Optionally focus the tab in the browser
+  if (params.focus !== false) {
+    await browser.tabs.update(tab.id, { active: true });
+    await browser.windows.update(tab.windowId, { focused: true });
+  }
+
+  return {
+    tabId: tab.id,
+    windowId: tab.windowId,
+    url: tab.url,
+    title: tab.title
+  };
+}
+
+// Fork: duplicate current tab into multiple paths
+async function executeFork(params, profile) {
+  if (!params?.paths || !Array.isArray(params.paths)) {
+    throw new Error("fork requires paths array");
+  }
+
+  const startTime = profile ? performance.now() : 0;
+  const sourceTabId = await resolveTabId(params);
+  const sourceTab = await browser.tabs.get(sourceTabId);
+
+  const forks = [];
+
+  for (const path of params.paths) {
+    const name = path.name || `fork-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    // Duplicate the tab
+    const newTab = await browser.tabs.duplicate(sourceTabId);
+
+    // Store fork info
+    activeForks.set(name, {
+      tabId: newTab.id,
+      parentTabId: sourceTabId,
+      parentUrl: sourceTab.url,
+      createdAt: Date.now(),
+      name
+    });
+
+    // Run initial commands if provided
+    const results = [];
+    if (path.commands && Array.isArray(path.commands)) {
+      for (const cmd of path.commands) {
+        try {
+          const cmdParams = { ...cmd.params, tabId: newTab.id };
+          const result = await dispatchAction(cmd.action, cmdParams, false);
+          results.push({ action: cmd.action, ok: true, result });
+        } catch (err) {
+          results.push({ action: cmd.action, ok: false, error: err.message });
+          if (path.stopOnError !== false) break;
+        }
+      }
+    }
+
+    // Get current state of fork
+    const forkTab = await browser.tabs.get(newTab.id);
+
+    forks.push({
+      name,
+      tabId: newTab.id,
+      url: forkTab.url,
+      title: forkTab.title,
+      commandResults: results
+    });
+  }
+
+  return {
+    forked: true,
+    sourceTabId,
+    sourceUrl: sourceTab.url,
+    forks,
+    timing: profile ? { ms: roundMs(performance.now() - startTime) } : undefined
+  };
+}
+
+// Kill a fork (close the tab)
+async function killFork(params) {
+  const name = params?.fork || params?.name;
+  if (!name) throw new Error("killFork requires fork name");
+
+  const fork = activeForks.get(name);
+  if (!fork) throw new Error(`Fork not found: ${name}`);
+
+  try {
+    await browser.tabs.remove(fork.tabId);
+  } catch (err) {
+    // Tab may already be closed
+  }
+
+  activeForks.delete(name);
+
+  return { killed: true, fork: name };
+}
+
+// List all active forks
+async function listForks() {
+  const forks = [];
+
+  for (const [name, fork] of activeForks) {
+    try {
+      const tab = await browser.tabs.get(fork.tabId);
+      forks.push({
+        name,
+        tabId: fork.tabId,
+        url: tab.url,
+        title: tab.title,
+        parentTabId: fork.parentTabId,
+        createdAt: fork.createdAt,
+        alive: true
+      });
+    } catch (err) {
+      // Tab was closed externally
+      forks.push({
+        name,
+        tabId: fork.tabId,
+        alive: false,
+        error: "Tab no longer exists"
+      });
+      activeForks.delete(name);
+    }
+  }
+
+  return { forks, count: forks.length };
 }
 
 async function waitForTabComplete(tabId, timeoutMs = 15000) {

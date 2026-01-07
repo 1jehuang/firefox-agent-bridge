@@ -537,9 +537,9 @@ async function handleWaitFor(params) {
   });
 }
 
-async function handleBranch(params) {
+async function handleTryUntil(params) {
   if (!params.alternatives || !Array.isArray(params.alternatives)) {
-    throw new Error("branch requires alternatives array");
+    throw new Error("tryUntil requires alternatives array");
   }
 
   const timeout = params.timeout || 5000;
@@ -971,8 +971,9 @@ browser.runtime.onMessage.addListener((message) => {
         return handleWaitFor(params);
       case "fillForm":
         return handleFillForm(params);
-      case "branch":
-        return handleBranch(params);
+      case "tryUntil":
+      case "branch":  // Legacy alias
+        return handleTryUntil(params);
       case "getInteractables":
         return handleGetInteractables(params);
       case "preexplore":
