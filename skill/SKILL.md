@@ -35,7 +35,7 @@ node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
 |--------|-------------|------------|
 | `navigate` | Go to URL | `url`, `wait`, `newTab`, `returnInteractables` |
 | `getActiveTab` | Get current tab info | - |
-| `getContent` | Get page content | `format`: `text`, `textFast`, `html`, `title` |
+| `getContent` | Get page content | `format`: `text`, `textFast`, `html`, `title`, `annotated` |
 | `getInteractables` | List clickable elements and inputs | `selector` (optional scope) |
 | `screenshot` | Capture visible area as PNG | `filename` (optional) |
 
@@ -142,6 +142,33 @@ node ~/.claude/skills/firefox-browser/client.js screenshot '{}'
 
 node ~/.claude/skills/firefox-browser/client.js screenshot '{"filename": "/tmp/my-screenshot.png"}'
 ```
+
+## Using getContent with `annotated` Format (Recommended)
+
+The `annotated` format combines page content with interactable elements inline, giving you everything in one call:
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated"}'
+```
+
+Returns content with interactive elements marked:
+```
+Amazon Grocery, Ground Beef, 80% Lean/20% Fat, 1 lb
+$4.99
+In Stock
+[button: "Qty: 1" | selector: #qty-button]
+[button: "Add to cart" | selector: #add-to-cart-btn]
+
+[input:text: "search" | value: "ground beef" | selector: #twotabsearchtextbox]
+[link: "Go to Cart" | href: /cart | selector: #nav-cart]
+```
+
+**Format of annotations:**
+- Buttons: `[button: "text" | selector: ...]`
+- Links: `[link: "text" | href: ... | selector: ...]`
+- Inputs: `[input:type: "name" | value: "..." | selector: ...]`
+
+This is better than separate `getContent` + `getInteractables` calls because you can see the context around each button (which product it belongs to, etc.).
 
 ## Using getInteractables
 
