@@ -697,12 +697,26 @@ async function newSession(params) {
   cachedActiveTabId = tab.id;
   cachedWindowId = tab.windowId;
 
-  return {
+  const result = {
     tabId: tab.id,
     windowId: tab.windowId,
     url: tab.url,
     title: tab.title
   };
+
+  // Return content by default (or if explicitly requested)
+  if (url !== "about:blank" && params?.returnContent !== false) {
+    try {
+      await new Promise(r => setTimeout(r, 100)); // Wait for content script
+      const format = params?.contentFormat || "annotated";
+      const content = await sendToContent("getContent", { format }, false);
+      result.content = content;
+    } catch (err) {
+      result.contentError = err.message;
+    }
+  }
+
+  return result;
 }
 
 // Set which tab the agent is working on
@@ -879,11 +893,23 @@ async function navigateTo(params) {
 
   const result = { tabId, url: params.url };
 
-  // Auto-return interactables if requested (saves an agent turn!)
+  // Small delay to ensure content script is ready
+  await new Promise(r => setTimeout(r, 100));
+
+  // Return content by default (annotated format)
+  if (params.returnContent !== false) {
+    try {
+      const format = params.contentFormat || "annotated";
+      const content = await sendToContent("getContent", { format }, false);
+      result.content = content;
+    } catch (err) {
+      result.contentError = err.message;
+    }
+  }
+
+  // Legacy: also return interactables if explicitly requested
   if (params.returnInteractables) {
     try {
-      // Small delay to ensure content script is ready
-      await new Promise(r => setTimeout(r, 100));
       const interactables = await sendToContent("getInteractables", {}, false);
       result.interactables = interactables;
     } catch (err) {
