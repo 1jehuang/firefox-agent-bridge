@@ -1,5 +1,33 @@
 {
-  "devDependencies": {
-    "web-ext": "^9.2.0"
+  "name": "firefox-agent-bridge",
+  "version": "1.0.0",
+  "description": "Control Firefox browser from LLM agents via WebSocket. Uses real browser with existing logins and cookies.",
+  "main": "cli.js",
+  "bin": {
+    "browser": "./cli.js"
+  },
+  "scripts": {
+    "postinstall": "node ./scripts/postinstall.js"
+  },
+  "keywords": [
+    "firefox",
+    "browser",
+    "automation",
+    "agent",
+    "llm",
+    "claude",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/1jehuang/firefox-agent-bridge.git"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }

@@ -1,0 +1,21 @@
+# Dev files
+native-host-dev/
+extension-dev/
+benchmarks/
+web-ext-artifacts/
+*.xpi
+
+# Git
+.git/
+.gitignore
+
+# Docs (keep README, exclude others)
+docs/
+CHANGELOG.md
+
+# Lock files
+package-lock.json
+
+# Tests
+*.test.js
+*.spec.js
