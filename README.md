@@ -28,19 +28,22 @@ cd ..
 ./scripts/install-native-host.sh
 ```
 
-### 3. Install the CLI (Rust - Recommended)
+### 3. Install the CLI (for Claude Code)
 
 ```bash
 cargo install --path rust-cli
 browser setup claude  # Installs Claude Code skill
 ```
 
-Or use npx for one-off commands:
-```bash
-npx browser ping
+### Alternative: Direct WebSocket
+
+Agents can connect directly to `ws://127.0.0.1:8765` and send JSON:
+
+```json
+{"action": "navigate", "params": {"url": "https://example.com"}}
 ```
 
-Default WebSocket endpoint: `ws://127.0.0.1:8765`
+The CLI is a convenience wrapper - the WebSocket API is the core interface.
 
 ## Performance
 
