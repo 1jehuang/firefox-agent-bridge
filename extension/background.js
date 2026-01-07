@@ -697,11 +697,11 @@ async function newSession(params) {
     const privateWindow = await browser.windows.create({
       url,
       incognito: true,
-      focused: true
+      focused: params?.focus === true
     });
     tab = privateWindow.tabs[0];
   } else {
-    tab = await browser.tabs.create({ url, active: true });
+    tab = await browser.tabs.create({ url, active: params?.focus === true });
   }
 
   if (url !== "about:blank" && params?.wait !== false) {
@@ -742,8 +742,8 @@ async function setActiveTab(params) {
   cachedActiveTabId = tab.id;
   cachedWindowId = tab.windowId;
 
-  // Optionally focus the tab in the browser
-  if (params.focus !== false) {
+  // Optionally focus the tab in the browser (default: no focus stealing)
+  if (params.focus === true) {
     await browser.tabs.update(tab.id, { active: true });
     await browser.windows.update(tab.windowId, { focused: true });
   }

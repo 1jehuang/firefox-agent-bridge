@@ -26,10 +26,13 @@
     "default_title": "Browser Agent Bridge - Idle",
     "default_popup": "popup.html"
   },
-  "applications": {
+  "browser_specific_settings": {
     "gecko": {
-      "id": "firefox-agent-bridge@local",
-      "strict_min_version": "91.0"
+      "id": "browser-agent-bridge@1jehuang.github.io",
+      "strict_min_version": "91.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }

@@ -18,6 +18,7 @@
     "url": "https://github.com/1jehuang/firefox-agent-bridge.git"
   },
   "devDependencies": {
+    "web-ext": "^9.2.0",
     "ws": "^8.14.0"
   },
   "engines": {
