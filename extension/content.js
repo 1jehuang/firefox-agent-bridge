@@ -286,9 +286,69 @@ function getInteractableType(el) {
   return 'clickable';
 }
 
+function findClickableParent(el, maxDepth = 3) {
+  // Walk up to find if this element is inside a clickable parent
+  let current = el;
+  let depth = 0;
+  while (current && depth < maxDepth) {
+    if (isInteractable(current) && isElementVisible(current)) {
+      return current;
+    }
+    current = current.parentElement;
+    depth++;
+  }
+  return null;
+}
+
+function truncateUrl(url, maxLen = 60) {
+  if (!url || url.length <= maxLen) return url;
+  try {
+    const u = new URL(url);
+    // Just show pathname, truncated
+    const path = u.pathname + u.search;
+    if (path.length > maxLen) {
+      return path.slice(0, maxLen - 3) + '...';
+    }
+    return path;
+  } catch {
+    return url.slice(0, maxLen - 3) + '...';
+  }
+}
+
 function buildAnnotatedContent(root) {
   const lines = [];
   const seen = new Set();
+  const processedElements = new WeakSet();
+
+  function addInteractable(el) {
+    if (processedElements.has(el)) return;
+    processedElements.add(el);
+
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 100);
+    const type = getInteractableType(el);
+    const selector = getSelector(el);
+
+    // Create a unique key to avoid duplicates
+    const key = `${type}:${text}:${selector}`;
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+
+    if (type === 'link') {
+      // Truncate href, omit if we have a good selector
+      const hasGoodSelector = selector && (selector.startsWith('#') || selector.startsWith('[name='));
+      if (hasGoodSelector) {
+        lines.push(`[${type}: "${text}" | selector: ${selector}]`);
+      } else {
+        const shortHref = truncateUrl(el.href);
+        lines.push(`[${type}: "${text}" | href: ${shortHref} | selector: ${selector}]`);
+      }
+    } else if (type.startsWith('input:') || type === 'textarea') {
+      const value = el.value ? ` | value: "${el.value.slice(0, 50)}"` : '';
+      lines.push(`[${type}: "${text || el.name || el.id || 'unnamed'}"${value} | selector: ${selector}]`);
+    } else {
+      lines.push(`[${type}: "${text}" | selector: ${selector}]`);
+    }
+  }
 
   function walk(node) {
     if (!node) return;
@@ -302,7 +362,15 @@ function buildAnnotatedContent(root) {
     // Handle text nodes
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.textContent.trim();
-      if (text) lines.push(text);
+      if (text) {
+        // Check if this text is inside a clickable element
+        const clickableParent = findClickableParent(node.parentElement);
+        if (clickableParent && isElementVisible(clickableParent)) {
+          addInteractable(clickableParent);
+        } else {
+          lines.push(text);
+        }
+      }
       return;
     }
 
@@ -312,23 +380,7 @@ function buildAnnotatedContent(root) {
 
       // Check if this is an interactable element
       if (isInteractable(el) && isElementVisible(el)) {
-        const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 100);
-        const type = getInteractableType(el);
-        const selector = getSelector(el);
-
-        // Create a unique key to avoid duplicates
-        const key = `${type}:${text}:${selector}`;
-        if (text && !seen.has(key)) {
-          seen.add(key);
-          if (type === 'link' && el.href) {
-            lines.push(`[${type}: "${text}" | href: ${el.href} | selector: ${selector}]`);
-          } else if (type.startsWith('input:') || type === 'textarea') {
-            const value = el.value ? ` | value: "${el.value.slice(0, 50)}"` : '';
-            lines.push(`[${type}: "${text || el.name || el.id || 'unnamed'}"${value} | selector: ${selector}]`);
-          } else {
-            lines.push(`[${type}: "${text}" | selector: ${selector}]`);
-          }
-        }
+        addInteractable(el);
         return; // Don't recurse into interactables
       }
 
