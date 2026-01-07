@@ -18,3 +18,4 @@ web-ext-artifacts/
 # Build artifacts
 *.xpi
 logs/
+dist/
