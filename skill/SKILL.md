@@ -11,14 +11,17 @@ Control the user's actual Firefox browser session via WebSocket. This uses their
 ## Quick Start
 
 ```bash
-# Verify connection
+# 1. Check connection
 node ~/.claude/skills/firefox-browser/client.js ping
 
-# Navigate and get page elements in one call
-node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://example.com", "returnInteractables": true}'
+# 2. See what tabs are open
+node ~/.claude/skills/firefox-browser/client.js listTabs '{}'
 
-# Get page text
-node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "text"}'
+# 3. Start a new session (recommended)
+node ~/.claude/skills/firefox-browser/client.js newSession '{"url": "https://example.com"}'
+
+# 4. Read the page with interactable elements marked
+node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated"}'
 ```
 
 ## Client Usage
@@ -29,13 +32,21 @@ node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
 
 ## Actions Reference
 
+### Session & Tab Management
+
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `listTabs` | List all open tabs across windows | - |
+| `newSession` | Create new tab to work in | `url` (optional) |
+| `setActiveTab` | Switch which tab agent works on | `tabId`, `focus` |
+| `getActiveTab` | Get current tab info | - |
+
 ### Navigation & Page Info
 
 | Action | Description | Key Params |
 |--------|-------------|------------|
-| `navigate` | Go to URL | `url`, `wait`, `newTab`, `returnInteractables` |
-| `getActiveTab` | Get current tab info | - |
-| `getContent` | Get page content | `format`: `text`, `textFast`, `html`, `title`, `annotated` |
+| `navigate` | Go to URL in current tab | `url`, `wait`, `newTab` |
+| `getContent` | Get page content | `format`: `annotated`, `text`, `html` |
 | `getInteractables` | List clickable elements and inputs | `selector` (optional scope) |
 | `screenshot` | Capture visible area as PNG | `filename` (optional) |
 
@@ -44,235 +55,200 @@ node ~/.claude/skills/firefox-browser/client.js <action> '<json_params>'
 | Action | Description | Key Params |
 |--------|-------------|------------|
 | `click` | Click element | `selector`, `text`, or `x`/`y` coords |
-| `type` | Type into input | `selector`, `text`, `submit`, `clear`, `append` |
+| `type` | Type into input | `selector`, `text`, `submit`, `clear` |
 | `fillForm` | Fill multiple fields | `fields[]` with selector/value pairs |
-| `waitFor` | Wait for element/text | `selector`, `text`, or `contains`; `timeout` |
+| `waitFor` | Wait for element/text | `selector`, `text`, `timeout` |
 
-### Advanced
+### Control Flow
 
 | Action | Description | Key Params |
 |--------|-------------|------------|
-| `batch` | Run commands sequentially | `commands[]`, `stopOnError` |
-| `parallel` | Run commands on multiple pages | `branches[]` with url + commands |
-| `branch` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
-| `scout` | Explore site structure | `url`, `goal`, `depth`, `maxPages` |
+| `fork` | Duplicate tab into multiple paths | `paths[]` with name + commands |
+| `killFork` | Close a fork | `fork` (name) |
+| `listForks` | List active forks | - |
+| `tryUntil` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
+| `parallel` | Run commands on multiple URLs | `branches[]` with url + commands |
 
 ### Authentication
 
 | Action | Description | Key Params |
 |--------|-------------|------------|
-| `getAuthContext` | Detect if page is login/auth, get available accounts | - |
-| `requestAuth` | Request user approval for auth action | `reason` |
+| `getAuthContext` | Detect login pages, available accounts | - |
+| `requestAuth` | Request user approval for auth | `reason` |
 | `configureAuth` | Set auth preferences | `authMode`, `setSiteRule`, `domain` |
 
-## Common Patterns
+---
 
-### 1. Navigate and Understand Page (Recommended First Step)
+## Recommended Workflow
 
-```bash
-# Get page with interactive elements in one call
-node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://site.com", "returnInteractables": true}'
-```
-
-Returns: `{tabId, url, interactables: {elements: [...]}}`
-
-### 2. Search a Website
+### 1. Start by Inspecting Available Tabs
 
 ```bash
-# Navigate
-node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://duckduckgo.com"}'
-
-# Type and submit
-node ~/.claude/skills/firefox-browser/client.js type '{"selector": "input[name=q]", "text": "search query", "submit": true}'
-
-# Wait for results
-node ~/.claude/skills/firefox-browser/client.js waitFor '{"contains": "results", "timeout": 10000}'
-
-# Get content
-node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "text"}'
+node ~/.claude/skills/firefox-browser/client.js listTabs '{}'
 ```
 
-### 3. Click Elements
+Returns:
+```json
+{
+  "activeTabId": 123,
+  "windows": [
+    {
+      "windowId": 1,
+      "focused": true,
+      "tabs": [
+        {"tabId": 123, "url": "https://...", "title": "...", "active": true}
+      ]
+    }
+  ],
+  "totalTabs": 5
+}
+```
+
+### 2. Start Fresh or Pick Existing Tab
 
 ```bash
-# By CSS selector
-node ~/.claude/skills/firefox-browser/client.js click '{"selector": "button.submit"}'
+# Start fresh
+node ~/.claude/skills/firefox-browser/client.js newSession '{"url": "https://amazon.com"}'
 
-# By visible text
-node ~/.claude/skills/firefox-browser/client.js click '{"text": "Sign In"}'
-
-# By coordinates (for tricky elements)
-node ~/.claude/skills/firefox-browser/client.js click '{"x": 100, "y": 200}'
+# Or switch to existing tab
+node ~/.claude/skills/firefox-browser/client.js setActiveTab '{"tabId": 456}'
 ```
 
-### 4. Fill a Form
-
-```bash
-node ~/.claude/skills/firefox-browser/client.js fillForm '{"fields": [
-  {"selector": "#email", "value": "user@example.com"},
-  {"selector": "#password", "value": "secret"},
-  {"selector": "#remember", "checked": true}
-]}'
-```
-
-### 5. Fetch Multiple Pages in Parallel
-
-```bash
-node ~/.claude/skills/firefox-browser/client.js parallel '{"branches": [
-  {"url": "https://site1.com", "commands": [{"action": "getContent", "params": {"format": "title"}}]},
-  {"url": "https://site2.com", "commands": [{"action": "getContent", "params": {"format": "title"}}]}
-]}'
-```
-
-### 6. Handle Uncertain UI (Try Alternatives)
-
-```bash
-node ~/.claude/skills/firefox-browser/client.js branch '{"alternatives": [
-  {"action": "click", "params": {"selector": "#accept-cookies"}},
-  {"action": "click", "params": {"text": "Accept"}},
-  {"action": "click", "params": {"selector": ".cookie-banner button"}}
-], "timeout": 3000}'
-```
-
-### 7. Take Screenshot
-
-```bash
-node ~/.claude/skills/firefox-browser/client.js screenshot '{}'
-# Saves to /tmp/firefox-screenshot-<timestamp>.png
-
-node ~/.claude/skills/firefox-browser/client.js screenshot '{"filename": "/tmp/my-screenshot.png"}'
-```
-
-## Using getContent with `annotated` Format (Recommended)
-
-The `annotated` format combines page content with interactable elements inline, giving you everything in one call:
+### 3. Read Page with Annotated Format (Recommended)
 
 ```bash
 node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated"}'
 ```
 
-Returns content with interactive elements marked:
+Returns content with interactive elements marked inline:
 ```
-Amazon Grocery, Ground Beef, 80% Lean/20% Fat, 1 lb
+Product Name Here
 $4.99
-In Stock
-[button: "Qty: 1" | selector: #qty-button]
-[button: "Add to cart" | selector: #add-to-cart-btn]
-
-[input:text: "search" | value: "ground beef" | selector: #twotabsearchtextbox]
-[link: "Go to Cart" | href: /cart | selector: #nav-cart]
+[button: "Add to cart" | selector: #add-btn]
+[input:text: "search" | value: "" | selector: #search-box]
+[link: "View details" | href: /product/123 | selector: a.details-link]
 ```
 
-**Format of annotations:**
-- Buttons: `[button: "text" | selector: ...]`
-- Links: `[link: "text" | href: ... | selector: ...]`
-- Inputs: `[input:type: "name" | value: "..." | selector: ...]`
+This shows **what's clickable** and **where it is in context**.
 
-This is better than separate `getContent` + `getInteractables` calls because you can see the context around each button (which product it belongs to, etc.).
-
-## Using getInteractables
-
-The `getInteractables` action returns all clickable elements and form inputs. Use this to understand page structure:
+### 4. Interact Using Selectors
 
 ```bash
-node ~/.claude/skills/firefox-browser/client.js getInteractables '{}'
+# Click using selector from annotated output
+node ~/.claude/skills/firefox-browser/client.js click '{"selector": "#add-btn"}'
+
+# Or by text (prefers visible elements)
+node ~/.claude/skills/firefox-browser/client.js click '{"text": "Add to cart"}'
+
+# Type into input
+node ~/.claude/skills/firefox-browser/client.js type '{"selector": "#search-box", "text": "query", "submit": true}'
+```
+
+---
+
+## Fork: Speculative Parallel Execution
+
+When you're not sure which path is right, fork the tab and try both:
+
+```bash
+# Create forks
+node ~/.claude/skills/firefox-browser/client.js fork '{
+  "paths": [
+    {
+      "name": "google-auth",
+      "commands": [{"action": "click", "params": {"text": "Sign in with Google"}}]
+    },
+    {
+      "name": "email-auth",
+      "commands": [{"action": "click", "params": {"text": "Sign in with Email"}}]
+    }
+  ]
+}'
 ```
 
 Returns:
 ```json
 {
-  "url": "https://example.com",
-  "title": "Page Title",
-  "elements": [
-    {"type": "clickable", "tag": "A", "text": "Link Text", "selector": "#link-id", "rect": {...}},
-    {"type": "input", "tag": "INPUT", "inputType": "text", "name": "email", "selector": "#email", "label": "Email"}
+  "forked": true,
+  "sourceTabId": 123,
+  "forks": [
+    {"name": "google-auth", "tabId": 456, "url": "...", "commandResults": [...]},
+    {"name": "email-auth", "tabId": 789, "url": "...", "commandResults": [...]}
   ]
 }
 ```
 
-## Macros (Pre-built Workflows)
-
-Run common multi-step tasks with one command:
-
+Work on specific fork:
 ```bash
-# List available macros
-node ~/.claude/skills/firefox-browser/macro.js
-
-# Search DuckDuckGo
-node ~/.claude/skills/firefox-browser/macro.js "search duckduckgo for weather in seattle"
-
-# Search Google
-node ~/.claude/skills/firefox-browser/macro.js "search google for best restaurants"
-
-# Get page content
-node ~/.claude/skills/firefox-browser/macro.js "get the content of https://example.com"
+node ~/.claude/skills/firefox-browser/client.js getContent '{"format": "annotated", "fork": "google-auth"}'
+node ~/.claude/skills/firefox-browser/client.js click '{"text": "Continue", "fork": "google-auth"}'
 ```
 
-### 8. Working with Authentication
+Kill the wrong path:
+```bash
+node ~/.claude/skills/firefox-browser/client.js killFork '{"fork": "email-auth"}'
+```
 
-The bridge can detect auth pages and leverage the user's existing browser sessions:
+---
+
+## TryUntil: Handle Uncertain UI
+
+When the exact button varies (cookie banners, A/B tests):
 
 ```bash
-# Check if current page is a login page
+node ~/.claude/skills/firefox-browser/client.js tryUntil '{
+  "alternatives": [
+    {"action": "click", "params": {"selector": "#accept-cookies"}},
+    {"action": "click", "params": {"text": "Accept All"}},
+    {"action": "click", "params": {"selector": ".cookie-dismiss"}}
+  ],
+  "timeout": 3000
+}'
+```
+
+Tries each until one succeeds.
+
+---
+
+## Parallel: Multiple URLs at Once
+
+Compare prices across sites:
+
+```bash
+node ~/.claude/skills/firefox-browser/client.js parallel '{
+  "branches": [
+    {"url": "https://amazon.com/product", "commands": [{"action": "getContent", "params": {"format": "text"}}]},
+    {"url": "https://walmart.com/product", "commands": [{"action": "getContent", "params": {"format": "text"}}]}
+  ]
+}'
+```
+
+---
+
+## Authentication
+
+The bridge detects auth pages and leverages existing browser sessions:
+
+```bash
+# Check if on login page
 node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
+
+# Returns available accounts, OAuth options, etc.
 ```
 
-Returns:
-```json
-{
-  "isAuthPage": true,
-  "authType": "login",
-  "detectedProvider": "Google",
-  "availableAccounts": ["j***@gmail.com"],
-  "formFields": ["email", "password"],
-  "oauthOptions": ["Google", "GitHub"],
-  "pageTitle": "Sign in",
-  "config": {"authMode": "always-allow"}
-}
-```
-
-**Auth workflow:**
-```bash
-# Navigate to a site requiring login
-node ~/.claude/skills/firefox-browser/client.js navigate '{"url": "https://github.com/settings"}'
-
-# Check auth context
-node ~/.claude/skills/firefox-browser/client.js getAuthContext '{}'
-
-# If already logged in (user's browser has cookies), just proceed
-# If login page detected, the user can leverage their saved accounts
-
-# Request auth with reason (shows desktop notification in "ask" mode)
-node ~/.claude/skills/firefox-browser/client.js requestAuth '{"reason": "Access GitHub settings"}'
-```
-
-**Configure auth preferences:**
-```bash
-# Set global mode: always-allow (default), ask, or always-deny
-node ~/.claude/skills/firefox-browser/client.js configureAuth '{"authMode": "always-allow"}'
-
-# Set per-site rule
-node ~/.claude/skills/firefox-browser/client.js configureAuth '{"domain": "github.com", "setSiteRule": "allow"}'
-
-# Remove site rule
-node ~/.claude/skills/firefox-browser/client.js configureAuth '{"domain": "example.com", "setSiteRule": "remove"}'
-```
+---
 
 ## Tips
 
-1. **Always start with `navigate` + `returnInteractables: true`** - saves a round trip
-2. **Use `textFast` format** when you just need raw text quickly
-3. **Use `text` for finding elements** when CSS selectors are unreliable
-4. **Use `batch`** to combine multiple commands into one request
-5. **Use `parallel`** to fetch from multiple pages simultaneously
-6. **Use `branch`** when the UI might vary (cookie banners, A/B tests)
-7. **Screenshots save to `/tmp/`** by default - use Read tool to view them
+1. **Start with `listTabs`** to see what's open
+2. **Use `newSession`** for a clean start
+3. **Use `annotated` format** - shows content + clickable elements together
+4. **Use selectors from annotated output** - more reliable than text matching
+5. **Fork when uncertain** - try multiple paths, kill the wrong ones
 
 ## Troubleshooting
 
-If commands fail:
-
-1. **Check connection**: `node ~/.claude/skills/firefox-browser/client.js ping`
-2. **Verify Firefox is running** with the Browser Agent Bridge extension loaded
+1. **Check connection**: `client.js ping`
+2. **Verify Firefox is running** with Browser Agent Bridge extension
 3. **Check `about:debugging`** in Firefox for extension errors
-4. **Element not found?** Use `getInteractables` to see what's actually on the page
+4. **Element not found?** Use `getContent '{"format": "annotated"}'` to see what's on the page
