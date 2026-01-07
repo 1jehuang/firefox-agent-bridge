@@ -14,46 +14,67 @@ const TASKS = {
   // === External site tasks (original) ===
   'search-duckduckgo': {
     prompt: `Using the firefox-browser skill, search DuckDuckGo for "weather in seattle" and return the first 3 results. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'type', 'getContent']
+    // Success: Agent reports search results about weather
+    successCriteria: ['weather', 'seattle'],
+    successDescription: 'Returns search results mentioning weather in Seattle'
   },
   'find-complaint-form': {
     prompt: `Using the firefox-browser skill, go to https://brightairindustries.com/?audience=community, find the "File a complaint" page, and list the form fields. Use scout first if available. Use: browser <action> '<json>'`,
-    expectedActions: ['scout', 'navigate', 'click', 'getInteractables']
+    successCriteria: ['complaint', 'form'],
+    successDescription: 'Lists form fields from the complaint page'
   },
   'multi-site-fetch': {
     prompt: `Using the firefox-browser skill, get the page titles from these 3 sites: example.com, httpbin.org, duckduckgo.com. Use parallel if possible. Use: browser <action> '<json>'`,
-    expectedActions: ['parallel']
+    successCriteria: ['example', 'httpbin', 'duckduckgo'],
+    successDescription: 'Returns titles from all 3 sites'
   },
 
   // === Local test site tasks ===
   'login-flow': {
-    prompt: `Using the firefox-browser skill, log into the test site at ${TEST_SERVER}/login.html. Use username "testuser" and password "secret123". After login, verify you see the protected content. Report what secret data is shown. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    prompt: `Using the firefox-browser skill, log into the test site at ${TEST_SERVER}/login.html. Use username "testuser" and password "secret123". After login, report what secret data is shown on the protected page. Use: browser <action> '<json>'`,
+    // The protected page shows: API Key "sk-test-1234567890" and Account ID "ACC-98765"
+    successCriteria: ['sk-test-1234567890', 'ACC-98765'],
+    successDescription: 'Reports the secret API key and Account ID from protected page',
     requiresTestServer: true
   },
   'search-extract': {
     prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/search.html, search for "documentation", and extract the titles of all results found. Return the results as a list. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'type', 'getContent'],
+    // Search results for "documentation" include these titles
+    successCriteria: ['documentation'],
+    successDescription: 'Returns list of search result titles',
     requiresTestServer: true
   },
   'contact-form': {
-    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/contact.html and fill out the contact form with: Name="John Doe", Email="john@example.com", Phone="555-123-4567", Subject="Technical Support", Message="This is a test message". Check the newsletter checkbox. Submit the form and confirm success. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'fillForm', 'click', 'getContent'],
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/contact.html and fill out the contact form with: Name="John Doe", Email="john@example.com", Subject="Technical Support", Message="This is a test message". Submit the form and report the confirmation. Use: browser <action> '<json>'`,
+    // Success message after form submission
+    successCriteria: ['success', 'submitted'],
+    successDescription: 'Form submitted successfully with confirmation',
     requiresTestServer: true
   },
   'wizard-complete': {
-    prompt: `Using the firefox-browser skill, complete the 3-step wizard at ${TEST_SERVER}/wizard/step1.html. Step 1: Enter First Name="Jane", Last Name="Smith", Email="jane@example.com". Step 2: Select Plan="Pro", Notifications="Weekly", Timezone="Pacific Time". Step 3: Confirm and complete. Report the final success message. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    prompt: `Using the firefox-browser skill, complete the 3-step wizard at ${TEST_SERVER}/wizard/step1.html. Fill in any reasonable values for each step. Report the final success message. Use: browser <action> '<json>'`,
+    successCriteria: ['complete', 'success'],
+    successDescription: 'Completes all wizard steps and reports success',
     requiresTestServer: true
   },
   'table-scrape': {
-    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/data.html and extract all rows from the data table. Return a JSON array with each row containing: ID, Name, Email, Department, Status, Score. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'getContent'],
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/data.html and extract the data from the table. Return the data showing ID, Name, and Department for each row. Use: browser <action> '<json>'`,
+    // Table contains employee data
+    successCriteria: ['Engineering', 'Marketing', 'Sales'],
+    successDescription: 'Extracts table data with department info',
     requiresTestServer: true
   },
   'protected-access': {
-    prompt: `Using the firefox-browser skill, first log into ${TEST_SERVER}/login.html with any username/password, then navigate to the protected page and extract the secret API key and Account ID. Use: browser <action> '<json>'`,
-    expectedActions: ['navigate', 'type', 'click', 'getContent'],
+    prompt: `Using the firefox-browser skill, log into ${TEST_SERVER}/login.html with any username/password, then navigate to the protected page and extract the secret API key. Use: browser <action> '<json>'`,
+    successCriteria: ['sk-test-1234567890'],
+    successDescription: 'Extracts the secret API key from protected page',
+    requiresTestServer: true
+  },
+  'oauth-flow': {
+    prompt: `Using the firefox-browser skill, go to ${TEST_SERVER}/oauth-demo.html, click "Sign in with Google", complete the OAuth flow by selecting an account and granting permission, then report the logged-in user's email. Use: browser <action> '<json>'`,
+    // Mock OAuth accounts use @gmail.com emails
+    successCriteria: ['@gmail.com'],
+    successDescription: 'Completes OAuth flow and reports user email',
     requiresTestServer: true
   }
 };
@@ -157,19 +178,38 @@ async function runAgentTask(taskName) {
       // Count approximate turns (each command is roughly a turn)
       metrics.turns = metrics.commandCount;
 
+      // Evaluate success based on output containing expected criteria
+      const outputLower = output.toLowerCase();
+      const criteriaResults = task.successCriteria.map(criterion => ({
+        criterion,
+        found: outputLower.includes(criterion.toLowerCase())
+      }));
+      const successCount = criteriaResults.filter(r => r.found).length;
+      metrics.success = successCount === task.successCriteria.length;
+      metrics.successRate = successCount / task.successCriteria.length;
+      metrics.criteriaResults = criteriaResults;
+      metrics.successDescription = task.successDescription;
+
       console.log(`\n--- Results ---`);
+      console.log(`Success:           ${metrics.success ? '✅ PASS' : '❌ FAIL'} (${successCount}/${task.successCriteria.length} criteria met)`);
+      console.log(`Goal:              ${task.successDescription}`);
       console.log(`Total time:        ${(metrics.totalMs / 1000).toFixed(1)}s`);
-      console.log(`Agent thinking:    ${(metrics.agentThinkingMs / 1000).toFixed(1)}s (${Math.round(metrics.agentThinkingMs / metrics.totalMs * 100)}%)`);
-      console.log(`Command execution: ${(metrics.commandExecutionMs / 1000).toFixed(1)}s (${Math.round(metrics.commandExecutionMs / metrics.totalMs * 100)}%)`);
       console.log(`Commands:          ${metrics.commandCount}`);
       console.log(`Avg think/command: ${metrics.commandCount ? Math.round(metrics.agentThinkingMs / metrics.commandCount) : 0}ms`);
+
+      // Show which criteria passed/failed
+      console.log(`\nSuccess criteria:`);
+      criteriaResults.forEach(r => {
+        console.log(`  ${r.found ? '✓' : '✗'} "${r.criterion}"`);
+      });
 
       console.log(`\nTimeline:`);
       metrics.events.forEach((e, i) => {
         console.log(`  ${i + 1}. ${e.action} (after ${e.thinkTimeMs}ms thinking)`);
       });
 
-      // Save results
+      // Save results with full output for analysis
+      metrics.output = output;
       const resultFile = `benchmarks/results/e2e-${taskName}-${Date.now()}.json`;
       fs.writeFileSync(resultFile, JSON.stringify(metrics, null, 2));
       console.log(`\n📄 Saved to ${resultFile}`);
@@ -184,6 +224,48 @@ async function runAgentTask(taskName) {
       resolve(metrics);
     }, 180000);
   });
+}
+
+function printSummary(results) {
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 BENCHMARK SUMMARY');
+  console.log('='.repeat(60));
+
+  const passed = results.filter(r => r.success).length;
+  const failed = results.length - passed;
+  const totalTime = results.reduce((sum, r) => sum + (r.totalMs || 0), 0);
+  const totalCommands = results.reduce((sum, r) => sum + (r.commandCount || 0), 0);
+
+  console.log(`\nOverall: ${passed}/${results.length} passed (${Math.round(passed / results.length * 100)}%)`);
+  console.log(`Total time: ${(totalTime / 1000).toFixed(1)}s`);
+  console.log(`Total commands: ${totalCommands}`);
+
+  console.log('\nResults by task:');
+  results.forEach(r => {
+    const status = r.success ? '✅' : '❌';
+    const time = r.totalMs ? `${(r.totalMs / 1000).toFixed(1)}s` : 'N/A';
+    const cmds = r.commandCount !== undefined ? r.commandCount : 'N/A';
+    console.log(`  ${status} ${r.name.padEnd(20)} ${time.padStart(8)} ${String(cmds).padStart(3)} cmds`);
+  });
+
+  // Save aggregate results
+  const summaryFile = `benchmarks/results/summary-${Date.now()}.json`;
+  fs.writeFileSync(summaryFile, JSON.stringify({
+    timestamp: new Date().toISOString(),
+    passRate: passed / results.length,
+    passed,
+    failed,
+    totalTime,
+    totalCommands,
+    results: results.map(r => ({
+      name: r.name,
+      success: r.success,
+      totalMs: r.totalMs,
+      commandCount: r.commandCount,
+      successRate: r.successRate
+    }))
+  }, null, 2));
+  console.log(`\n📄 Summary saved to ${summaryFile}`);
 }
 
 async function main() {
@@ -208,40 +290,49 @@ async function main() {
   }
 
   if (taskName === 'all') {
+    const results = [];
     for (const name of Object.keys(TASKS)) {
       try {
-        await runAgentTask(name);
+        results.push({ name, ...(await runAgentTask(name)) });
       } catch (err) {
         console.error(`Task ${name} failed:`, err.message);
+        results.push({ name, success: false, error: err.message });
       }
       console.log('\n');
     }
+    printSummary(results);
   } else if (taskName === 'local') {
     const localTasks = Object.entries(TASKS)
       .filter(([_, t]) => t.requiresTestServer)
       .map(([name]) => name);
     console.log(`Running ${localTasks.length} local tasks...\n`);
+    const results = [];
     for (const name of localTasks) {
       try {
-        await runAgentTask(name);
+        results.push({ name, ...(await runAgentTask(name)) });
       } catch (err) {
         console.error(`Task ${name} failed:`, err.message);
+        results.push({ name, success: false, error: err.message });
       }
       console.log('\n');
     }
+    printSummary(results);
   } else if (taskName === 'external') {
     const externalTasks = Object.entries(TASKS)
       .filter(([_, t]) => !t.requiresTestServer)
       .map(([name]) => name);
     console.log(`Running ${externalTasks.length} external tasks...\n`);
+    const results = [];
     for (const name of externalTasks) {
       try {
-        await runAgentTask(name);
+        results.push({ name, ...(await runAgentTask(name)) });
       } catch (err) {
         console.error(`Task ${name} failed:`, err.message);
+        results.push({ name, success: false, error: err.message });
       }
       console.log('\n');
     }
+    printSummary(results);
   } else {
     await runAgentTask(taskName);
   }

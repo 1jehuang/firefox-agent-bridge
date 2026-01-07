@@ -23,41 +23,46 @@ Default WebSocket endpoint: `ws://127.0.0.1:8765`
 
 ## Performance
 
-Benchmark results (v0.7.0 - January 2026):
+Benchmark results (v1.0.0 - January 2026):
 
-### Direct API Performance
+### CLI Performance (Rust vs Node.js)
 
-| Metric | Value |
-|--------|-------|
-| Command latency (avg) | **120ms** |
-| Navigation (avg) | **1.8s** |
-| Complex step (avg) | **120ms** |
+| CLI | Per-Command | Improvement |
+|-----|-------------|-------------|
+| **Rust** (`browser`) | **12ms** | baseline |
+| Node.js (`client.js`) | 105ms | 8.75x slower |
 
-### Benchmark Results
+The Rust CLI provides **88% faster** command execution.
 
-**Search Flow** (4 commands): 3.5s total
-- Navigate to DuckDuckGo: 1594ms
-- Type query + submit: 124ms
-- Wait for results: 116ms
-- Get content: 123ms
+### Command Timing Breakdown
 
-**Parallel Fetch** (3 sites): 1.36s parallel vs 2.41s sequential
-- **1.77x speedup** with parallel execution
+Use `--timing` flag for detailed breakdown:
 
-**Complex Navigation** (8 steps): 2.85s total, 100% success rate
-- Navigate + get interactables: 2010ms
-- Form navigation steps (avg): 120ms per step
-- All 8 steps successful
+```bash
+browser --timing navigate '{"url": "http://example.com"}'
+# Returns: {"_timing": {"total_ms": 156, "connect_ms": 0, "roundtrip_ms": 155}, ...}
+```
 
-### Agent E2E Results
+| Action | Total (ms) | Connect (ms) | Roundtrip (ms) |
+|--------|-----------|--------------|----------------|
+| ping | 3-8 | 0 | 3-8 |
+| navigate | 150-170 | 0 | 150-165 |
+| getContent | 2-33 | 0 | 2-33 |
+| type | 2-11 | 0 | 2-11 |
+| click | 2-5 | 0 | 2-5 |
+| fillForm | 3-10 | 0 | 3-10 |
 
-**Note:** Agent e2e benchmarks currently experience connection timeouts and require proper Anthropic API configuration. Previous successful runs (v0.6.0) showed:
+### E2E Agent Benchmark Results
 
-- Search DuckDuckGo: 2 commands (navigate, getContent)
-- Complaint form with scout: 3 commands (scout, click, getContent)
-- 100% success rate on standard tasks
+| Task | Status | Commands | Description |
+|------|--------|----------|-------------|
+| table-scrape | PASS | 3 | Extract 8-row data table |
+| oauth-flow | PASS | ~20 | Complete mock Google OAuth |
+| contact-form | PASS | 9 | Fill and submit form |
+| login-flow | PASS | 6 | Login and extract secrets |
 
-Send `profile: true` with any command for detailed timing breakdowns.
+**Note:** Parallel E2E tests require isolated sessions (`tabId`) to avoid conflicts.
+
 See `benchmarks/README.md` for the full benchmark suite and setup instructions.
 
 ## Profiling

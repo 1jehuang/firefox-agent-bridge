@@ -241,13 +241,32 @@ browser getAuthContext '{}'
 
 ---
 
+## Isolated Sessions (for Parallel Execution)
+
+When running multiple tasks in parallel, use `tabId` to avoid conflicts:
+
+```bash
+# 1. Create isolated session - get a unique tabId
+browser newSession '{"url": "https://example.com"}'
+# Returns: {"tabId": 15, "url": "...", "windowId": 1}
+
+# 2. Use that tabId in ALL subsequent commands
+browser navigate '{"url": "https://example.com/page", "tabId": 15}'
+browser getContent '{"format": "annotated", "tabId": 15}'
+browser click '{"selector": "#btn", "tabId": 15}'
+browser type '{"selector": "#input", "text": "hello", "tabId": 15}'
+```
+
+This lets multiple agents work in parallel without stepping on each other.
+
 ## Tips
 
 1. **Start with `listTabs`** to see what's open
 2. **Use `newSession`** for a clean start
-3. **Use `annotated` format** - shows content + clickable elements together
-4. **Use selectors from annotated output** - more reliable than text matching
-5. **Fork when uncertain** - try multiple paths, kill the wrong ones
+3. **Use `tabId`** for parallel/isolated execution
+4. **Use `annotated` format** - shows content + clickable elements together
+5. **Use selectors from annotated output** - more reliable than text matching
+6. **Fork when uncertain** - try multiple paths, kill the wrong ones
 
 ## Troubleshooting
 

@@ -65,8 +65,10 @@ async fn main() -> Result<()> {
         None => serde_json::json!({}),
     };
 
-    // Send to Firefox via WebSocket
-    let response = client::send_command(&action, params).await?;
+    // Send to Firefox via WebSocket (with timing)
+    let timed_response = client::send_command_timed(&action, params).await?;
+    let response = timed_response.response;
+    let timing = timed_response.timing;
 
     // Handle response
     match response {
@@ -76,10 +78,14 @@ async fn main() -> Result<()> {
                 if let Some(ref res) = result {
                     if let Ok(screenshot_result) = serde_json::from_value::<protocol::ScreenshotResult>(res.clone()) {
                         let filename = screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
-                        println!("{}", serde_json::json!({
+                        let mut output = serde_json::json!({
                             "saved": filename,
                             "tabId": screenshot_result.tab_id
-                        }));
+                        });
+                        if cli.timing {
+                            output["_timing"] = serde_json::to_value(&timing)?;
+                        }
+                        println!("{}", output);
                         return Ok(());
                     }
                 }
@@ -87,11 +93,30 @@ async fn main() -> Result<()> {
 
             // Regular output
             if let Some(res) = result {
-                println!("{}", serde_json::to_string_pretty(&res)?);
+                if cli.timing {
+                    // Merge timing into result if it's an object, otherwise wrap
+                    let mut output = if res.is_object() {
+                        res.clone()
+                    } else {
+                        serde_json::json!({ "result": res })
+                    };
+                    output["_timing"] = serde_json::to_value(&timing)?;
+                    println!("{}", serde_json::to_string_pretty(&output)?);
+                } else {
+                    println!("{}", serde_json::to_string_pretty(&res)?);
+                }
+            } else if cli.timing {
+                // No result but timing requested
+                println!("{}", serde_json::json!({ "_timing": timing }));
             }
         }
         protocol::Response::Error { error, .. } => {
-            eprintln!("Error: {}", error);
+            if cli.timing {
+                eprintln!("Error: {} (timing: {}ms total, {}ms connect, {}ms roundtrip)",
+                    error, timing.total_ms, timing.connect_ms, timing.roundtrip_ms);
+            } else {
+                eprintln!("Error: {}", error);
+            }
             std::process::exit(1);
         }
         protocol::Response::Ready { .. } => {

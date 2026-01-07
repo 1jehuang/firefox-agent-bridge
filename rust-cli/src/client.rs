@@ -1,15 +1,35 @@
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::{TIMEOUT_MS, WS_URL};
 use crate::protocol::{Request, Response};
 
-/// Send a command to Firefox via WebSocket and return the response
-pub async fn send_command(action: &str, params: Value) -> Result<Response> {
+/// Timing breakdown for a command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Timing {
+    /// Total time from start to finish (ms)
+    pub total_ms: u64,
+    /// Time to establish WebSocket connection (ms)
+    pub connect_ms: u64,
+    /// Time to send request and receive response (ms)
+    pub roundtrip_ms: u64,
+}
+
+/// Response with timing information
+pub struct TimedResponse {
+    pub response: Response,
+    pub timing: Timing,
+}
+
+/// Send a command to Firefox via WebSocket and return the response with timing
+pub async fn send_command_timed(action: &str, params: Value) -> Result<TimedResponse> {
+    let start = Instant::now();
+
     // Connect to WebSocket
     let (ws_stream, _) = connect_async(WS_URL).await.map_err(|e| {
         anyhow!(
@@ -17,6 +37,9 @@ pub async fn send_command(action: &str, params: Value) -> Result<Response> {
             e
         )
     })?;
+
+    let connect_time = start.elapsed();
+    let roundtrip_start = Instant::now();
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -61,5 +84,20 @@ pub async fn send_command(action: &str, params: Value) -> Result<Response> {
     .await
     .map_err(|_| anyhow!("Timeout waiting for response"))??;
 
-    Ok(response)
+    let roundtrip_time = roundtrip_start.elapsed();
+    let total_time = start.elapsed();
+
+    let timing = Timing {
+        total_ms: total_time.as_millis() as u64,
+        connect_ms: connect_time.as_millis() as u64,
+        roundtrip_ms: roundtrip_time.as_millis() as u64,
+    };
+
+    Ok(TimedResponse { response, timing })
+}
+
+/// Send a command to Firefox via WebSocket and return the response (without timing)
+pub async fn send_command(action: &str, params: Value) -> Result<Response> {
+    let timed = send_command_timed(action, params).await?;
+    Ok(timed.response)
 }

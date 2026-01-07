@@ -18,6 +18,10 @@ pub struct Cli {
     /// JSON parameters for the action
     #[arg(value_name = "PARAMS")]
     pub params: Option<String>,
+
+    /// Include timing breakdown in output (total, connect, roundtrip in ms)
+    #[arg(short, long)]
+    pub timing: bool,
 }
 
 #[derive(Subcommand)]
