@@ -78,12 +78,16 @@ browser --timing navigate '{"url": "http://example.com"}'
 
 ### E2E Agent Benchmark Results
 
-| Task | Status | Commands | Description |
-|------|--------|----------|-------------|
-| table-scrape | PASS | 3 | Extract 8-row data table |
-| oauth-flow | PASS | ~20 | Complete mock Google OAuth |
-| contact-form | PASS | 9 | Fill and submit form |
-| login-flow | PASS | 6 | Login and extract secrets |
+| Task | Status | Commands | Total Time | Cmd Execution | Description |
+|------|--------|----------|------------|---------------|-------------|
+| table-scrape | PASS | 3 | ~8s | ~0.4s | Extract 8-row data table |
+| oauth-flow | PASS | ~20 | ~45s | ~3s | Complete mock Google OAuth |
+| contact-form | PASS | 9 | ~20s | ~1s | Fill and submit form |
+| login-flow | PASS | 6 | ~15s | ~0.8s | Login and extract secrets |
+
+**Timing breakdown:**
+- **Total Time** = LLM thinking + command execution (dominated by LLM API latency)
+- **Cmd Execution** = actual browser commands only (~120ms/command average)
 
 **Note:** Parallel E2E tests require isolated sessions (`tabId`) to avoid conflicts.
 
