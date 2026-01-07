@@ -1,0 +1,46 @@
+[package]
+name = "firefox-agent-bridge"
+version = "1.0.0"
+edition = "2021"
+description = "Control Firefox browser from LLM agents via WebSocket"
+license = "MIT"
+repository = "https://github.com/1jehuang/firefox-agent-bridge"
+readme = "../README.md"
+keywords = ["firefox", "browser", "automation", "agent", "websocket"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "browser"
+path = "src/main.rs"
+
+[dependencies]
+# CLI parsing
+clap = { version = "4", features = ["derive", "cargo"] }
+
+# WebSocket client
+tokio-tungstenite = "0.24"
+tokio = { version = "1", features = ["rt", "macros", "time", "fs", "io-util"] }
+futures-util = "0.3"
+
+# JSON handling
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Base64 for screenshot decoding
+base64 = "0.22"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Platform-specific home directory
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
