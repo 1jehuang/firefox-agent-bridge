@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: browser-linux-x64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: browser-linux-x64-musl
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: browser-linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: browser-macos-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: browser-macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: browser-windows-x64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install musl tools (Linux musl)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Build
+        working-directory: rust-cli
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Prepare artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp rust-cli/target/${{ matrix.target }}/release/browser ${{ matrix.name }}
+          chmod +x ${{ matrix.name }}
+
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          copy rust-cli\target\${{ matrix.target }}\release\browser.exe ${{ matrix.name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            cp "$dir"* release/
+          done
+          ls -la release/
+
+      - name: Create checksums
+        working-directory: release
+        run: |
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: firefox-agent-bridge ${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            release/*
+          body: |
+            ## firefox-agent-bridge ${{ steps.version.outputs.version }}
+
+            ### Installation
+
+            Download the appropriate binary for your platform:
+
+            | Platform | Binary |
+            |----------|--------|
+            | Linux x64 | `browser-linux-x64` |
+            | Linux x64 (static) | `browser-linux-x64-musl` |
+            | Linux ARM64 | `browser-linux-arm64` |
+            | macOS Intel | `browser-macos-x64` |
+            | macOS Apple Silicon | `browser-macos-arm64` |
+            | Windows x64 | `browser-windows-x64.exe` |
+
+            **Quick install (Linux/macOS):**
+            ```bash
+            # Download
+            curl -L https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/browser-linux-x64 -o browser
+            chmod +x browser
+            sudo mv browser /usr/local/bin/
+
+            # Verify
+            browser --version
+            ```
+
+            **Setup for Claude Code:**
+            ```bash
+            browser setup claude
+            ```
