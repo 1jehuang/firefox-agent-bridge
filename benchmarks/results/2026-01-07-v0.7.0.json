@@ -1,0 +1,59 @@
+{
+  "version": "0.7.0",
+  "date": "2026-01-07",
+  "benchmarks": {
+    "search": {
+      "benchmark": "simple-search",
+      "version": "0.7.0",
+      "timestamp": "2026-01-07T12:51:16.507Z",
+      "query": "firefox extension development",
+      "totalMs": 3457,
+      "commands": 4,
+      "breakdown": [
+        { "step": "navigate", "ms": 1594 },
+        { "step": "type+submit", "ms": 124 },
+        { "step": "waitFor", "ms": 116 },
+        { "step": "getContent", "ms": 123 }
+      ]
+    },
+    "parallel": {
+      "benchmark": "parallel-vs-sequential",
+      "version": "0.7.0",
+      "timestamp": "2026-01-07T12:51:26.137Z",
+      "sites": 3,
+      "parallelMs": 1357,
+      "sequentialMs": 2408,
+      "speedup": 1.77
+    },
+    "complex": {
+      "benchmark": "complex-navigation",
+      "version": "0.7.0",
+      "timestamp": "2026-01-07T12:51:33.214Z",
+      "site": "brightairindustries.com",
+      "totalMs": 2848,
+      "stepsTotal": 8,
+      "stepsSuccessful": 8,
+      "breakdown": [
+        { "step": "navigate+interactables", "ms": 2010, "ok": true },
+        { "step": "getInteractables", "ms": 119, "ok": true },
+        { "step": "click-permits", "ms": 140, "ok": true },
+        { "step": "wait+interactables", "ms": 124, "ok": true },
+        { "step": "click-first-permit", "ms": 129, "ok": true },
+        { "step": "get-details", "ms": 114, "ok": true },
+        { "step": "click-complaint", "ms": 121, "ok": true },
+        { "step": "get-form", "ms": 91, "ok": true }
+      ]
+    }
+  },
+  "summary": {
+    "commandAvgMs": 120,
+    "navigationAvgMs": 1800,
+    "complexStepAvgMs": 120,
+    "parallelSpeedup": "1.77x",
+    "successRate": "100%"
+  },
+  "notes": {
+    "e2e_agent_benchmarks": "Agent e2e benchmarks experienced timeout issues due to API configuration. Direct API benchmarks show stable performance.",
+    "improvements_since_v0.5.0": "Parallel execution shows 1.77x speedup (improved from 0.72x). Command latency increased slightly from 65ms to 120ms but navigation improved from 2000ms to 1800ms average."
+  }
+}
