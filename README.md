@@ -8,7 +8,18 @@ Bridge a WebSocket-connected AI agent to a live Firefox profile via a WebExtensi
 - Native messaging host forwards commands to the Firefox extension.
 - Extension executes browser actions and returns results.
 
-## Quick start
+## Installation
+
+### 1. Install the Firefox Extension
+
+Download the signed extension from [GitHub Releases](https://github.com/1jehuang/firefox-agent-bridge/releases/latest):
+
+1. Download `browser-agent-bridge-X.X.X.xpi`
+2. In Firefox, go to `about:addons`
+3. Click gear icon → "Install Add-on From File..."
+4. Select the downloaded XPI
+
+### 2. Install the Native Messaging Host
 
 ```bash
 cd native-host
@@ -17,7 +28,17 @@ cd ..
 ./scripts/install-native-host.sh
 ```
 
-Load the extension from `extension/manifest.json` via `about:debugging#/runtime/this-firefox`.
+### 3. Install the CLI (Rust - Recommended)
+
+```bash
+cargo install --path rust-cli
+browser setup claude  # Installs Claude Code skill
+```
+
+Or use npx for one-off commands:
+```bash
+npx browser ping
+```
 
 Default WebSocket endpoint: `ws://127.0.0.1:8765`
 
