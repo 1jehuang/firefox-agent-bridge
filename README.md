@@ -76,14 +76,14 @@ browser --timing navigate '{"url": "http://example.com"}'
 | click | 2-5 | 0 | 2-5 |
 | fillForm | 3-10 | 0 | 3-10 |
 
-### E2E Agent Benchmark Results (Claude Code + Sonnet)
+### E2E Agent Benchmark Results (Claude Code + Opus 4.5)
 
 | Task | Status | Commands | Total Time | Cmd Execution | Description |
 |------|--------|----------|------------|---------------|-------------|
-| table-scrape | PASS | 3 | ~8s | ~0.4s | Extract 8-row data table |
-| oauth-flow | PASS | ~20 | ~45s | ~3s | Complete mock Google OAuth |
-| contact-form | PASS | 9 | ~20s | ~1s | Fill and submit form |
-| login-flow | PASS | 6 | ~15s | ~0.8s | Login and extract secrets |
+| table-scrape | PASS | 3 | ~15s | ~0.2s | Extract 8-row data table |
+| oauth-flow | PASS | 8 | ~40s | ~1s | Complete mock Google OAuth |
+| contact-form | PASS | 4 | ~20s | ~0.15s | Fill and submit form |
+| login-flow | PASS | 12 | ~25s | ~1.5s | Login and extract secrets |
 
 *Tested with Claude Code (claude-opus-4-5-20251101)*
 

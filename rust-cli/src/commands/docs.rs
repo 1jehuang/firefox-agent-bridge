@@ -68,8 +68,23 @@ Control Firefox browser via WebSocket. Uses real browser with existing logins.
 ### Interaction
 - click             Click element (selector, text, or x/y)
 - type              Type into input (selector, text, submit)
-- fillForm          Fill multiple fields
+- fillForm          Fill form fields (inputs, textareas, selects)
 - waitFor           Wait for element/text
+
+## fillForm Usage
+
+Fill form fields including text inputs, textareas, and <select> dropdowns:
+
+```
+browser fillForm '{"fields": [
+  {"selector": "#name", "value": "John Doe"},
+  {"selector": "#email", "value": "john@example.com"},
+  {"selector": "#subject", "value": "support"},
+  {"selector": "#message", "value": "Hello"}
+]}'
+```
+
+NOTE: There is no "fill" command. Use fillForm with a fields array.
 
 ### Control Flow
 - fork              Duplicate tab into multiple paths
@@ -114,3 +129,4 @@ This opens a private window with no cookies or cached data.
 "##;
     println!("{}", docs);
 }
+

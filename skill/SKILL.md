@@ -58,9 +58,28 @@ browser <action> '<json_params>'
 | Action | Description | Key Params |
 |--------|-------------|------------|
 | `click` | Click element | `selector`, `text`, or `x`/`y` coords |
-| `type` | Type into input | `selector`, `text`, `submit`, `clear` |
-| `fillForm` | Fill multiple fields | `fields[]` with selector/value pairs |
+| `type` | Type into focused/selected input | `selector`, `text`, `submit`, `clear` |
+| `fillForm` | Fill form fields (inputs, textareas, selects) | `fields[]` array with selector/value |
 | `waitFor` | Wait for element/text | `selector`, `text`, `timeout` |
+
+#### fillForm - The Right Way to Fill Forms
+
+**IMPORTANT:** There is no `fill` command. Use `fillForm` with a `fields` array:
+
+```bash
+# Fill a single field
+browser fillForm '{"fields": [{"selector": "#email", "value": "test@example.com"}]}'
+
+# Fill multiple fields at once (text inputs, textareas, AND select dropdowns)
+browser fillForm '{"fields": [
+  {"selector": "#name", "value": "John Doe"},
+  {"selector": "#email", "value": "john@example.com"},
+  {"selector": "#subject", "value": "support"},
+  {"selector": "#message", "value": "Hello world"}
+]}'
+```
+
+Works with: `<input>`, `<textarea>`, `<select>`, checkboxes, radio buttons.
 
 ### Control Flow
 

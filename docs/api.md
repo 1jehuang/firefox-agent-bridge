@@ -5,7 +5,7 @@ All commands are JSON objects sent over WebSocket:
 ```json
 {
   "id": "optional-client-id",
-  "action": "navigate | click | type | getContent | screenshot | getActiveTab | ping",
+  "action": "navigate | click | type | fillForm | getContent | screenshot | getActiveTab | ping",
   "params": { "...": "..." },
   "profile": true
 }
@@ -59,6 +59,28 @@ Params:
 - `tabId` (optional)
 - `frameId` (optional)
 - `dispatchEvents` (optional, defaults true; set false to skip input/change events)
+
+### fillForm
+
+Fill multiple form fields at once. Works with `<input>`, `<textarea>`, `<select>`, checkboxes, and radio buttons.
+
+```json
+{ "action": "fillForm", "params": {
+  "fields": [
+    { "selector": "#name", "value": "John Doe" },
+    { "selector": "#email", "value": "john@example.com" },
+    { "selector": "#subject", "value": "support" },
+    { "selector": "#message", "value": "Hello world" }
+  ]
+}}
+```
+
+Params:
+- `fields` (required) - array of `{ selector, value }` objects
+- `tabId` (optional)
+- `frameId` (optional)
+
+**Note:** There is no `fill` action. Use `fillForm` with a single-element `fields` array for individual fields.
 
 ### getContent
 
