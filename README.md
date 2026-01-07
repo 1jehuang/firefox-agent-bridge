@@ -85,7 +85,7 @@ browser --timing navigate '{"url": "http://example.com"}'
 | contact-form | PASS | 9 | ~20s | ~1s | Fill and submit form |
 | login-flow | PASS | 6 | ~15s | ~0.8s | Login and extract secrets |
 
-*Tested with Claude Code (claude-sonnet-4-20250514)*
+*Tested with Claude Code (claude-opus-4-5-20251101)*
 
 **Timing breakdown:**
 - **Total Time** = LLM thinking + command execution (dominated by LLM API latency)
