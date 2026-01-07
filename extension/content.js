@@ -246,6 +246,108 @@ async function handleType(params) {
   return { typed: true, element: elementSummary(target), length: text.length };
 }
 
+function getSelector(el) {
+  if (!el) return null;
+  if (el.id) return `#${el.id}`;
+  if (el.name) return `[name="${el.name}"]`;
+  // Build a path-based selector
+  const path = [];
+  let current = el;
+  while (current && current !== document.body && path.length < 3) {
+    let selector = current.tagName.toLowerCase();
+    if (current.className && typeof current.className === 'string') {
+      const firstClass = current.className.split(' ').filter(c => c && !c.includes(':'))[0];
+      if (firstClass) selector += `.${firstClass}`;
+    }
+    path.unshift(selector);
+    current = current.parentElement;
+  }
+  return path.join(' > ');
+}
+
+function isInteractable(el) {
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'BUTTON' || tag === 'A' || tag === 'SELECT') return true;
+  if (tag === 'INPUT' && el.type !== 'hidden') return true;
+  if (tag === 'TEXTAREA') return true;
+  if (el.getAttribute('role') === 'button') return true;
+  if (el.onclick || el.getAttribute('onclick')) return true;
+  return false;
+}
+
+function getInteractableType(el) {
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'A') return 'link';
+  if (tag === 'BUTTON' || el.getAttribute('role') === 'button') return 'button';
+  if (tag === 'INPUT') return `input:${el.type || 'text'}`;
+  if (tag === 'TEXTAREA') return 'textarea';
+  if (tag === 'SELECT') return 'select';
+  return 'clickable';
+}
+
+function buildAnnotatedContent(root) {
+  const lines = [];
+  const seen = new Set();
+
+  function walk(node) {
+    if (!node) return;
+
+    // Skip hidden elements
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const style = window.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+    }
+
+    // Handle text nodes
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.trim();
+      if (text) lines.push(text);
+      return;
+    }
+
+    // Handle element nodes
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node;
+
+      // Check if this is an interactable element
+      if (isInteractable(el) && isElementVisible(el)) {
+        const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim().slice(0, 100);
+        const type = getInteractableType(el);
+        const selector = getSelector(el);
+
+        // Create a unique key to avoid duplicates
+        const key = `${type}:${text}:${selector}`;
+        if (text && !seen.has(key)) {
+          seen.add(key);
+          if (type === 'link' && el.href) {
+            lines.push(`[${type}: "${text}" | href: ${el.href} | selector: ${selector}]`);
+          } else if (type.startsWith('input:') || type === 'textarea') {
+            const value = el.value ? ` | value: "${el.value.slice(0, 50)}"` : '';
+            lines.push(`[${type}: "${text || el.name || el.id || 'unnamed'}"${value} | selector: ${selector}]`);
+          } else {
+            lines.push(`[${type}: "${text}" | selector: ${selector}]`);
+          }
+        }
+        return; // Don't recurse into interactables
+      }
+
+      // Recurse into children
+      for (const child of el.childNodes) {
+        walk(child);
+      }
+    }
+  }
+
+  walk(root);
+
+  // Clean up: remove excessive blank lines and join
+  return lines
+    .filter(line => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 async function handleGetContent(params) {
   const format = params && params.format ? params.format : "html";
   let target = null;
@@ -255,16 +357,21 @@ async function handleGetContent(params) {
     return { title: document.title, url: window.location.href };
   }
 
-  const root = document.body || document.documentElement;
+  const root = target || document.body || document.documentElement;
 
   if (format === "text") {
-    const text = target ? target.innerText : root.innerText;
+    const text = root.innerText;
     return { text, url: window.location.href, title: document.title };
   }
 
   if (format === "textFast") {
-    const text = target ? target.textContent : root.textContent;
+    const text = root.textContent;
     return { text, url: window.location.href, title: document.title };
+  }
+
+  if (format === "annotated") {
+    const content = buildAnnotatedContent(root);
+    return { content, url: window.location.href, title: document.title };
   }
 
   const html = target ? target.outerHTML : document.documentElement.outerHTML;
