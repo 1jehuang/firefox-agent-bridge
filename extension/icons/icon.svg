@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- Browser window -->
+  <rect x="4" y="8" width="40" height="32" rx="3" fill="#4a90d9" stroke="#2d5a87" stroke-width="2"/>
+  <!-- Title bar -->
+  <rect x="4" y="8" width="40" height="8" rx="3" fill="#2d5a87"/>
+  <circle cx="10" cy="12" r="2" fill="#ff6b6b"/>
+  <circle cx="16" cy="12" r="2" fill="#ffd93d"/>
+  <circle cx="22" cy="12" r="2" fill="#6bcb77"/>
+  <!-- Connection symbol (bridge) -->
+  <circle cx="16" cy="28" r="5" fill="#fff" stroke="#2d5a87" stroke-width="2"/>
+  <circle cx="32" cy="28" r="5" fill="#fff" stroke="#2d5a87" stroke-width="2"/>
+  <line x1="21" y1="28" x2="27" y2="28" stroke="#2d5a87" stroke-width="3"/>
+  <!-- Signal waves -->
+  <path d="M36 22 Q40 28 36 34" fill="none" stroke="#6bcb77" stroke-width="2" stroke-linecap="round"/>
+  <path d="M39 20 Q44 28 39 36" fill="none" stroke="#6bcb77" stroke-width="2" stroke-linecap="round"/>
+</svg>

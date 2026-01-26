@@ -342,6 +342,17 @@ function buildAnnotatedContent(root) {
         const shortHref = truncateUrl(el.href);
         lines.push(`[${type}: "${text}" | href: ${shortHref} | selector: ${selector}]`);
       }
+    } else if (type === 'input:checkbox' || type === 'input:radio') {
+      // Show checked state for checkboxes and radio buttons
+      const checked = el.checked ? 'true' : 'false';
+      const label = text || el.name || el.id || 'unnamed';
+      lines.push(`[${type}: "${label}" | checked: ${checked} | selector: ${selector}]`);
+    } else if (type === 'select') {
+      // Show selected option for dropdowns
+      const selectedOption = el.options && el.options[el.selectedIndex];
+      const selected = selectedOption ? selectedOption.text.slice(0, 50) : '';
+      const label = text || el.name || el.id || 'unnamed';
+      lines.push(`[${type}: "${label}" | selected: "${selected}" | selector: ${selector}]`);
     } else if (type.startsWith('input:') || type === 'textarea') {
       const value = el.value ? ` | value: "${el.value.slice(0, 50)}"` : '';
       lines.push(`[${type}: "${text || el.name || el.id || 'unnamed'}"${value} | selector: ${selector}]`);
@@ -466,6 +477,30 @@ async function handleFillForm(params) {
         el.value = field.value || "";
         el.dispatchEvent(new Event("change", { bubbles: true }));
         results.push({ selector: field.selector, ok: true, type: "select", value: el.value });
+
+      } else if (tagName === "INPUT" && inputType === "file") {
+        // File input - expects field.file with {name, type, data (base64)}
+        if (!field.file || !field.file.data) {
+          results.push({ selector: field.selector, ok: false, error: "Missing file data" });
+          continue;
+        }
+        try {
+          const byteString = atob(field.file.data);
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([ab], { type: field.file.type || "application/octet-stream" });
+          const file = new File([blob], field.file.name || "file", { type: blob.type });
+          const dataTransfer = new DataTransfer();
+          dataTransfer.items.add(file);
+          el.files = dataTransfer.files;
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          results.push({ selector: field.selector, ok: true, type: "file", filename: file.name });
+        } catch (fileErr) {
+          results.push({ selector: field.selector, ok: false, error: fileErr.message });
+        }
 
       } else if (tagName === "TEXTAREA" || tagName === "INPUT") {
         // Text inputs and textareas
@@ -953,6 +988,140 @@ async function handleDetectAuth() {
   };
 }
 
+async function handleEvaluate(params) {
+  if (!params || !params.script) {
+    throw new Error("Missing script parameter");
+  }
+
+  try {
+    // Use Function constructor to evaluate in global scope
+    // This is safer than eval() and works similarly
+    const fn = new Function(params.script);
+    const result = fn();
+
+    // Handle promises
+    const resolvedResult = result instanceof Promise ? await result : result;
+
+    // Serialize the result appropriately
+    if (resolvedResult === undefined) {
+      return { result: null, type: 'undefined' };
+    }
+    if (resolvedResult === null) {
+      return { result: null, type: 'null' };
+    }
+    if (typeof resolvedResult === 'function') {
+      return { result: resolvedResult.toString(), type: 'function' };
+    }
+    if (resolvedResult instanceof Element) {
+      return { result: elementSummary(resolvedResult), type: 'element' };
+    }
+    if (resolvedResult instanceof NodeList || resolvedResult instanceof HTMLCollection) {
+      return { result: Array.from(resolvedResult).map(el => elementSummary(el)), type: 'nodelist' };
+    }
+
+    // Try to serialize as JSON, fallback to string
+    try {
+      // Test if it's JSON-serializable
+      JSON.stringify(resolvedResult);
+      return { result: resolvedResult, type: typeof resolvedResult };
+    } catch {
+      return { result: String(resolvedResult), type: 'string' };
+    }
+  } catch (err) {
+    throw new Error(`Evaluate error: ${err.message}`);
+  }
+}
+
+async function handleScroll(params) {
+  if (!params) {
+    throw new Error("Missing scroll parameters");
+  }
+
+  // Scroll by pixel amount
+  if (params.y !== undefined || params.x !== undefined) {
+    window.scrollBy({
+      left: params.x || 0,
+      top: params.y || 0,
+      behavior: params.behavior || 'auto'
+    });
+    return {
+      scrolled: true,
+      type: 'by',
+      x: params.x || 0,
+      y: params.y || 0,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY
+    };
+  }
+
+  // Scroll element into view
+  if (params.selector) {
+    const el = document.querySelector(params.selector);
+    if (!el) {
+      throw new Error(`Element not found: ${params.selector}`);
+    }
+    el.scrollIntoView({
+      block: params.block || 'center',
+      inline: params.inline || 'center',
+      behavior: params.behavior || 'auto'
+    });
+    return {
+      scrolled: true,
+      type: 'element',
+      selector: params.selector,
+      element: elementSummary(el)
+    };
+  }
+
+  // Scroll to position (top/bottom)
+  if (params.position) {
+    const pos = params.position.toLowerCase();
+    if (pos === 'top') {
+      window.scrollTo({ top: 0, left: 0, behavior: params.behavior || 'auto' });
+    } else if (pos === 'bottom') {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        left: 0,
+        behavior: params.behavior || 'auto'
+      });
+    } else if (pos === 'left') {
+      window.scrollTo({ top: window.scrollY, left: 0, behavior: params.behavior || 'auto' });
+    } else if (pos === 'right') {
+      window.scrollTo({
+        top: window.scrollY,
+        left: document.documentElement.scrollWidth,
+        behavior: params.behavior || 'auto'
+      });
+    } else {
+      throw new Error(`Unknown position: ${params.position}. Use top, bottom, left, or right.`);
+    }
+    return {
+      scrolled: true,
+      type: 'position',
+      position: pos,
+      scrollX: window.scrollX,
+      scrollY: window.scrollY
+    };
+  }
+
+  // Scroll to absolute coordinates
+  if (params.scrollTo) {
+    window.scrollTo({
+      top: params.scrollTo.y || 0,
+      left: params.scrollTo.x || 0,
+      behavior: params.behavior || 'auto'
+    });
+    return {
+      scrolled: true,
+      type: 'absolute',
+      scrollX: window.scrollX,
+      scrollY: window.scrollY
+    };
+  }
+
+  throw new Error('scroll requires y/x (relative), selector, position (top/bottom), or scrollTo ({x, y})');
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -980,6 +1149,10 @@ browser.runtime.onMessage.addListener((message) => {
         return handlePreexplore(params);
       case "detectAuth":
         return handleDetectAuth();
+      case "evaluate":
+        return handleEvaluate(params);
+      case "scroll":
+        return handleScroll(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

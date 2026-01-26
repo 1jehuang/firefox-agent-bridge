@@ -61,6 +61,8 @@ browser <action> '<json_params>'
 | `type` | Type into input | `selector`, `text`, `submit`, `clear` |
 | `fillForm` | Fill multiple fields | `fields[]` with selector/value pairs |
 | `waitFor` | Wait for element/text | `selector`, `text`, `timeout` |
+| `scroll` | Scroll the page | `y`/`x`, `selector`, `position` |
+| `evaluate` | Execute JavaScript and return result | `script` |
 
 ### Control Flow
 
@@ -238,6 +240,80 @@ browser getAuthContext '{}'
 
 # Returns available accounts, OAuth options, etc.
 ```
+
+---
+
+## Evaluate: Run JavaScript and Get Results
+
+Execute arbitrary JavaScript in the page context and get the result back:
+
+```bash
+# Get page title
+browser evaluate '{"script": "return document.title"}'
+# Returns: {"result": "My Page Title", "type": "string"}
+
+# Count elements
+browser evaluate '{"script": "return document.querySelectorAll(\"input\").length"}'
+# Returns: {"result": 5, "type": "number"}
+
+# Get form values
+browser evaluate '{"script": "return document.querySelector(\"#email\").value"}'
+# Returns: {"result": "user@example.com", "type": "string"}
+
+# Complex queries
+browser evaluate '{"script": "return Array.from(document.querySelectorAll(\"input:checked\")).map(el => el.value)"}'
+# Returns: {"result": ["option1", "option3"], "type": "object"}
+```
+
+**Note:** Use `return` to get a value back. The script runs in page context with full DOM access.
+
+---
+
+## Scroll: Navigate Long Pages
+
+Scroll the page by pixels, to elements, or to positions:
+
+```bash
+# Scroll down 500 pixels
+browser scroll '{"y": 500}'
+
+# Scroll up 300 pixels
+browser scroll '{"y": -300}'
+
+# Scroll element into view
+browser scroll '{"selector": "#section-5"}'
+
+# Scroll to top/bottom
+browser scroll '{"position": "top"}'
+browser scroll '{"position": "bottom"}'
+
+# Smooth scrolling
+browser scroll '{"y": 500, "behavior": "smooth"}'
+
+# Scroll to absolute position
+browser scroll '{"scrollTo": {"x": 0, "y": 1000}}'
+```
+
+---
+
+## Form State in Annotated Content
+
+The `getContent` annotated format now shows form element states:
+
+```bash
+browser getContent '{"format": "annotated"}'
+```
+
+Output includes checked/selected states:
+```
+[input:radio: "Option A" | checked: true | selector: #opt-a]
+[input:radio: "Option B" | checked: false | selector: #opt-b]
+[input:checkbox: "Remember me" | checked: true | selector: #remember]
+[select: "Country" | selected: "United States" | selector: #country]
+[input:text: "Email" | value: "user@example.com" | selector: #email]
+```
+
+This is useful for verifying form state without screenshots.
 
 ---
 

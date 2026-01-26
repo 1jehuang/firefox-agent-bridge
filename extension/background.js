@@ -268,6 +268,11 @@ async function dispatchAction(action, params, profile) {
     case "ping":
       return { pong: true, time: Date.now() };
 
+    case "reload":
+      // Reload the extension - response sent before reload happens
+      setTimeout(() => browser.runtime.reload(), 100);
+      return { reloading: true, message: "Extension will reload in 100ms" };
+
     // Session/Tab Management
     case "listTabs":
       return listAllTabs();
@@ -323,6 +328,14 @@ async function dispatchAction(action, params, profile) {
       return configureAuth(params);
     case "requestAuth":
       return requestAuth(params);
+
+    // JavaScript evaluation
+    case "evaluate":
+      return sendToContent("evaluate", params, profile);
+
+    // Scrolling
+    case "scroll":
+      return sendToContent("scroll", params, profile);
 
     // Legacy (keeping for backwards compat)
     case "batch":
