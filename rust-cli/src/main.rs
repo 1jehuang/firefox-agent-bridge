@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use cli::{Cli, Command};
-use commands::{docs, screenshot, setup};
+use commands::{dev, docs, screenshot, setup, start};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -23,6 +23,10 @@ async fn main() -> Result<()> {
                 Ok(())
             }
             Command::Setup { target } => setup::run(&target),
+            Command::Start { url, timeout } => start::run(url.as_deref(), timeout).await,
+            Command::Dev { source_dir, port, watch } => {
+                dev::run(source_dir.as_deref(), port, watch).await
+            }
         };
     }
 
