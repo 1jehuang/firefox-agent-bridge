@@ -1122,6 +1122,81 @@ async function handleScroll(params) {
   throw new Error('scroll requires y/x (relative), selector, position (top/bottom), or scrollTo ({x, y})');
 }
 
+// Handle file upload - finds file inputs and sets files via DataTransfer
+// params.selector - optional selector for specific file input
+// params.file - { name, type, data (base64) }
+// params.files - array of { name, type, data } for multiple files
+function handleUploadFile(params) {
+  const files = params.files || (params.file ? [params.file] : []);
+  if (files.length === 0) {
+    throw new Error('uploadFile requires file or files parameter with {name, type, data (base64)}');
+  }
+
+  // Find the file input
+  let fileInput = null;
+  if (params.selector) {
+    fileInput = document.querySelector(params.selector);
+  } else {
+    // Find all file inputs and use the first visible one, or first one
+    const allFileInputs = document.querySelectorAll('input[type="file"]');
+    for (const inp of allFileInputs) {
+      if (isElementVisible(inp)) {
+        fileInput = inp;
+        break;
+      }
+    }
+    // Fallback to first file input even if hidden (common pattern)
+    if (!fileInput && allFileInputs.length > 0) {
+      fileInput = allFileInputs[0];
+    }
+  }
+
+  if (!fileInput) {
+    throw new Error('No file input found on page');
+  }
+
+  // Create File objects from base64 data
+  const dataTransfer = new DataTransfer();
+  const uploadedFiles = [];
+
+  for (const fileData of files) {
+    if (!fileData.data) {
+      throw new Error('File data (base64) is required');
+    }
+    try {
+      const byteString = atob(fileData.data);
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      const mimeType = fileData.type || 'application/octet-stream';
+      const blob = new Blob([ab], { type: mimeType });
+      const file = new File([blob], fileData.name || 'file', { type: mimeType });
+      dataTransfer.items.add(file);
+      uploadedFiles.push({ name: file.name, type: file.type, size: file.size });
+    } catch (err) {
+      throw new Error(`Failed to process file ${fileData.name}: ${err.message}`);
+    }
+  }
+
+  // Set the files on the input
+  fileInput.files = dataTransfer.files;
+  
+  // Dispatch change event to trigger any listeners
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  
+  // Some sites also listen for input event
+  fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+  return {
+    uploaded: true,
+    count: uploadedFiles.length,
+    files: uploadedFiles,
+    inputSelector: fileInput.id ? `#${fileInput.id}` : fileInput.name ? `[name="${fileInput.name}"]` : 'input[type="file"]'
+  };
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -1153,6 +1228,8 @@ browser.runtime.onMessage.addListener((message) => {
         return handleEvaluate(params);
       case "scroll":
         return handleScroll(params);
+      case "uploadFile":
+        return handleUploadFile(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }

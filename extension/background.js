@@ -296,6 +296,8 @@ async function dispatchAction(action, params, profile) {
       return sendToContent("fillForm", params, profile);
     case "waitFor":
       return sendToContent("waitFor", params, profile);
+    case "uploadFile":
+      return sendToContent("uploadFile", params, profile);
 
     // Page Content
     case "getContent":
