@@ -298,6 +298,8 @@ async function dispatchAction(action, params, profile) {
       return sendToContent("waitFor", params, profile);
     case "uploadFile":
       return sendToContent("uploadFile", params, profile);
+    case "dropFile":
+      return sendToContent("dropFile", params, profile);
 
     // Page Content
     case "getContent":

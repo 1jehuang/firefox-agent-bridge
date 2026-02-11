@@ -6,6 +6,7 @@ mod error;
 mod protocol;
 
 use anyhow::Result;
+use base64::Engine;
 use clap::Parser;
 
 use cli::{Cli, Command};
@@ -61,12 +62,114 @@ async fn main() -> Result<()> {
         return setup::run(target);
     }
 
-    // Parse JSON params
+    // Parse JSON params (support @filename to read from file)
     let params: serde_json::Value = match &cli.params {
+        Some(p) if p.starts_with('@') => {
+            let file_path = &p[1..];
+            let content = std::fs::read_to_string(file_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", file_path, e))?;
+            serde_json::from_str(&content)
+                .map_err(|e| anyhow::anyhow!("Invalid JSON in file '{}': {}", file_path, e))?
+        }
         Some(p) => serde_json::from_str(p).map_err(|e| {
             anyhow::anyhow!("Invalid JSON params: {}", e)
         })?,
         None => serde_json::json!({}),
+    };
+
+    // Handle uploadFile action - transform to fillForm with base64 file data
+    let (action, params) = if action == "uploadFile" {
+        let selector = params.get("selector")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| anyhow::anyhow!("uploadFile requires 'selector' param"))?;
+        let file_path = params.get("path")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| anyhow::anyhow!("uploadFile requires 'path' param"))?;
+
+        // Read file and encode as base64
+        let file_bytes = std::fs::read(file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", file_path, e))?;
+        let base64_data = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
+
+        // Get filename from path
+        let filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        // Detect MIME type from extension
+        let mime_type = match std::path::Path::new(file_path).extension().and_then(|e| e.to_str()) {
+            Some("pdf") => "application/pdf",
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("txt") => "text/plain",
+            Some("html") | Some("htm") => "text/html",
+            Some("json") => "application/json",
+            Some("zip") => "application/zip",
+            Some("doc") => "application/msword",
+            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _ => "application/octet-stream",
+        };
+
+        // Transform to fillForm params
+        let fill_params = serde_json::json!({
+            "fields": [{
+                "selector": selector,
+                "file": {
+                    "name": filename,
+                    "type": mime_type,
+                    "data": base64_data
+                }
+            }]
+        });
+
+        ("fillForm".to_string(), fill_params)
+    } else if action == "dropFile" {
+        let selector = params.get("selector")
+            .and_then(|s| s.as_str())
+            .unwrap_or("[contenteditable=\"true\"]");
+        let file_path = params.get("path")
+            .and_then(|s| s.as_str())
+            .ok_or_else(|| anyhow::anyhow!("dropFile requires 'path' param"))?;
+
+        // Read file and encode as base64
+        let file_bytes = std::fs::read(file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", file_path, e))?;
+        let base64_data = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
+
+        let filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        let mime_type = match std::path::Path::new(file_path).extension().and_then(|e| e.to_str()) {
+            Some("pdf") => "application/pdf",
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("txt") => "text/plain",
+            Some("html") | Some("htm") => "text/html",
+            Some("json") => "application/json",
+            Some("zip") => "application/zip",
+            Some("tex") => "application/x-tex",
+            Some("doc") => "application/msword",
+            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            _ => "application/octet-stream",
+        };
+
+        let drop_params = serde_json::json!({
+            "selector": selector,
+            "file": {
+                "name": filename,
+                "type": mime_type,
+                "data": base64_data
+            }
+        });
+
+        ("dropFile".to_string(), drop_params)
+    } else {
+        (action, params)
     };
 
     // Send to Firefox via WebSocket (with timing)

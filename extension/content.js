@@ -187,6 +187,79 @@ function isEditable(el) {
   );
 }
 
+// React-compatible input value setter
+// Uses multiple strategies to ensure React sees the input change
+function setInputValueReact(el, value) {
+  // Focus the element
+  el.focus();
+
+  // Get native setter for the element type
+  const tagName = el.tagName;
+  let nativeSetter = null;
+  if (tagName === 'INPUT') {
+    nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  } else if (tagName === 'TEXTAREA') {
+    nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  }
+
+  // Clear existing content first
+  if (el.select) el.select();
+
+  // Set the value using native setter
+  if (nativeSetter) {
+    nativeSetter.call(el, value);
+  } else {
+    el.value = value;
+  }
+
+  // CRITICAL: React tracks input values in _valueTracker
+  // We need to make React think the value changed
+  // Method 1: Delete the tracker entirely
+  if (el._valueTracker) {
+    delete el._valueTracker;
+  }
+
+  // Method 2: Also try to find and call React's onChange directly
+  // React stores event handlers in a special property
+  const reactKey = Object.keys(el).find(key =>
+    key.startsWith('__reactProps$') ||
+    key.startsWith('__reactEventHandlers$') ||
+    key.startsWith('__reactFiber$')
+  );
+
+  if (reactKey && el[reactKey]) {
+    const props = el[reactKey];
+    // Try to call onChange directly if it exists
+    if (props.onChange) {
+      try {
+        // Create a synthetic-like event
+        const syntheticEvent = {
+          target: el,
+          currentTarget: el,
+          type: 'change',
+          bubbles: true,
+          preventDefault: () => {},
+          stopPropagation: () => {},
+          nativeEvent: new Event('input', { bubbles: true })
+        };
+        props.onChange(syntheticEvent);
+      } catch (e) {
+        // onChange call failed, continue with events
+      }
+    }
+  }
+
+  // Dispatch standard events as fallback
+  el.dispatchEvent(new InputEvent('input', {
+    bubbles: true,
+    cancelable: true,
+    inputType: 'insertText',
+    data: value
+  }));
+
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 async function handleType(params) {
   if (!params || !params.text) throw new Error("Missing text parameter");
   const target = resolveElement(params || {});
@@ -205,16 +278,19 @@ async function handleType(params) {
   if (target.isContentEditable || target.getAttribute("contenteditable") === "true") {
     if (clear) target.textContent = "";
     target.textContent = append ? `${target.textContent}${text}` : text;
-  } else {
-    if (clear && "value" in target) target.value = "";
-    if ("value" in target) {
-      target.value = append ? `${target.value}${text}` : text;
+    if (params.dispatchEvents !== false) {
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+      target.dispatchEvent(new Event("change", { bubbles: true }));
     }
-  }
-
-  if (params.dispatchEvents !== false) {
-    target.dispatchEvent(new Event("input", { bubbles: true }));
-    target.dispatchEvent(new Event("change", { bubbles: true }));
+  } else {
+    // Use React-compatible setter for input/textarea elements
+    const currentValue = target.value || "";
+    const newValue = clear ? (append ? text : text) : (append ? `${currentValue}${text}` : text);
+    if (params.dispatchEvents !== false) {
+      setInputValueReact(target, newValue);
+    } else {
+      target.value = newValue;
+    }
   }
 
   if (params.submit) {
@@ -503,11 +579,9 @@ async function handleFillForm(params) {
         }
 
       } else if (tagName === "TEXTAREA" || tagName === "INPUT") {
-        // Text inputs and textareas
+        // Text inputs and textareas - use React-compatible setter
         el.focus();
-        el.value = field.value || "";
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        setInputValueReact(el, field.value || "");
         results.push({ selector: field.selector, ok: true, type: "text", value: el.value });
 
       } else if (el.isContentEditable || el.getAttribute("contenteditable") === "true") {
@@ -1197,6 +1271,67 @@ function handleUploadFile(params) {
   };
 }
 
+// Handle file drop - simulates drag-and-drop onto a target element
+// Works with sites like Gmail where file input change events are ignored
+// params.selector - CSS selector for drop target (e.g., compose body)
+// params.file - { name, type, data (base64) }
+// params.files - array of { name, type, data } for multiple files
+function handleDropFile(params) {
+  const fileSpecs = params.files || (params.file ? [params.file] : []);
+  if (fileSpecs.length === 0) {
+    throw new Error('dropFile requires file or files parameter with {name, type, data (base64)}');
+  }
+
+  // Find the drop target
+  const target = params.selector
+    ? document.querySelector(params.selector)
+    : document.querySelector('[contenteditable="true"]') || document.body;
+
+  if (!target) {
+    throw new Error('No drop target found');
+  }
+
+  // Create File objects from base64 data
+  const dataTransfer = new DataTransfer();
+  const uploadedFiles = [];
+
+  for (const fileData of fileSpecs) {
+    if (!fileData.data) {
+      throw new Error('File data (base64) is required');
+    }
+    const byteString = atob(fileData.data);
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const mimeType = fileData.type || 'application/octet-stream';
+    const blob = new Blob([ab], { type: mimeType });
+    const file = new File([blob], fileData.name || 'file', { type: mimeType });
+    dataTransfer.items.add(file);
+    uploadedFiles.push({ name: file.name, type: file.type, size: file.size });
+  }
+
+  // Simulate full drag-and-drop sequence
+  const eventProps = {
+    bubbles: true,
+    cancelable: true,
+    dataTransfer: dataTransfer
+  };
+
+  target.dispatchEvent(new DragEvent('dragenter', eventProps));
+  target.dispatchEvent(new DragEvent('dragover', eventProps));
+  target.dispatchEvent(new DragEvent('drop', eventProps));
+  target.dispatchEvent(new DragEvent('dragleave', eventProps));
+
+  return {
+    dropped: true,
+    count: uploadedFiles.length,
+    files: uploadedFiles,
+    target: params.selector || '[contenteditable="true"]'
+  };
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -1230,6 +1365,8 @@ browser.runtime.onMessage.addListener((message) => {
         return handleScroll(params);
       case "uploadFile":
         return handleUploadFile(params);
+      case "dropFile":
+        return handleDropFile(params);
       default:
         throw new Error(`Unknown content action: ${message.action}`);
     }
