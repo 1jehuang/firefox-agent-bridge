@@ -1332,6 +1332,77 @@ function handleDropFile(params) {
   };
 }
 
+async function handleSecureAutoFill(params) {
+  const { username, password, submit } = params;
+  const filled = { username: false, password: false, submitted: false };
+
+  const usernameSelectors = [
+    'input[type="email"]',
+    'input[name*="user" i]',
+    'input[name*="email" i]',
+    'input[name*="login" i]',
+    'input[id*="user" i]',
+    'input[id*="email" i]',
+    'input[id*="login" i]',
+    'input[autocomplete="username"]',
+    'input[autocomplete="email"]',
+    'input[placeholder*="email" i]',
+    'input[placeholder*="user" i]',
+  ];
+
+  const passwordSelectors = [
+    'input[type="password"]',
+    'input[autocomplete="current-password"]',
+    'input[name*="pass" i]',
+    'input[id*="pass" i]',
+  ];
+
+  function fillField(selectors, value) {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && isElementVisible(el)) {
+        el.focus();
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  if (username) {
+    filled.username = fillField(usernameSelectors, username);
+  }
+
+  if (password) {
+    filled.password = fillField(passwordSelectors, password);
+  }
+
+  if (submit && (filled.username || filled.password)) {
+    await new Promise(r => setTimeout(r, 100));
+
+    const submitButton = document.querySelector(
+      'button[type="submit"], input[type="submit"], ' +
+      'button:not([type])[class*="login" i], button:not([type])[class*="sign" i], ' +
+      'button[name*="login" i], button[name*="sign" i]'
+    );
+
+    if (submitButton) {
+      submitButton.click();
+      filled.submitted = true;
+    } else {
+      const form = document.querySelector('form');
+      if (form) {
+        form.submit();
+        filled.submitted = true;
+      }
+    }
+  }
+
+  return filled;
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
@@ -1359,6 +1430,8 @@ browser.runtime.onMessage.addListener((message) => {
         return handlePreexplore(params);
       case "detectAuth":
         return handleDetectAuth();
+      case "secureAutoFill":
+        return handleSecureAutoFill(params);
       case "evaluate":
         return handleEvaluate(params);
       case "scroll":

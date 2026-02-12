@@ -333,6 +333,10 @@ async function dispatchAction(action, params, profile) {
     case "requestAuth":
       return requestAuth(params);
 
+    // Secure credential fill (only from native host, never from WS client)
+    case "secureAutoFill":
+      return sendToContent("secureAutoFill", params, profile);
+
     // JavaScript evaluation
     case "evaluate":
       return sendToContent("evaluate", params, profile);

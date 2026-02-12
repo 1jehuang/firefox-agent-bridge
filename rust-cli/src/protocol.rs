@@ -19,15 +19,15 @@ pub enum Response {
         host: Option<String>,
         port: Option<u16>,
     },
+    /// Error response (tried before Success because it's more specific — requires `error` field)
+    Error {
+        ok: bool,
+        error: String,
+    },
     /// Successful response
     Success {
         ok: bool,
         result: Option<Value>,
-    },
-    /// Error response
-    Error {
-        ok: bool,
-        error: String,
     },
 }
 

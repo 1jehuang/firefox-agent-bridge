@@ -13,13 +13,17 @@ categories = ["command-line-utilities", "development-tools"]
 name = "browser"
 path = "src/main.rs"
 
+[[bin]]
+name = "firefox-agent-bridge-host"
+path = "src/bin/host.rs"
+
 [dependencies]
 # CLI parsing
 clap = { version = "4", features = ["derive", "cargo"] }
 
 # WebSocket client
 tokio-tungstenite = "0.24"
-tokio = { version = "1", features = ["rt", "macros", "time", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "io-util", "sync", "net"] }
 futures-util = "0.3"
 
 # JSON handling
@@ -28,6 +32,9 @@ serde_json = "1"
 
 # Base64 for screenshot decoding
 base64 = "0.22"
+
+# URL parsing (for autoLogin domain extraction)
+url = "2"
 
 # Error handling
 thiserror = "2"
