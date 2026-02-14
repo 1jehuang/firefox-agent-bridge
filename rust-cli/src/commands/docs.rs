@@ -23,7 +23,7 @@ ACTIONS:
   Navigation:  navigate, getContent, getInteractables, screenshot
   Interaction: click, type, fillForm, waitFor
   Control:     fork, killFork, listForks, tryUntil, parallel
-  Auth:        getAuthContext, requestAuth, configureAuth
+  Auth:        getAuthContext, requestAuth
   Utility:     ping
 
 EXAMPLES:
@@ -96,7 +96,6 @@ NOTE: There is no "fill" command. Use fillForm with a fields array.
 ### Auth
 - getAuthContext    Detect login pages
 - requestAuth       Request user auth approval
-- configureAuth     Set auth preferences
 
 ## Content Formats
 
@@ -129,4 +128,3 @@ This opens a private window with no cookies or cached data.
 "##;
     println!("{}", docs);
 }
-

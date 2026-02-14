@@ -328,8 +328,6 @@ async function dispatchAction(action, params, profile) {
     // Auth
     case "getAuthContext":
       return getAuthContext(params, profile);
-    case "configureAuth":
-      return configureAuth(params);
     case "requestAuth":
       return requestAuth(params);
 
@@ -535,24 +533,6 @@ async function getAuthContext(params, profile) {
       siteRule: authConfig.siteRules[getDomainFromUrl(tab.url)] || null
     }
   };
-}
-
-async function configureAuth(params) {
-  if (params.authMode && ["ask", "always-allow", "always-deny"].includes(params.authMode)) {
-    authConfig.authMode = params.authMode;
-  }
-  if (typeof params.authNotifications === "boolean") {
-    authConfig.authNotifications = params.authNotifications;
-  }
-  if (params.setSiteRule && params.domain) {
-    if (params.setSiteRule === "remove") {
-      delete authConfig.siteRules[params.domain];
-    } else if (["allow", "deny"].includes(params.setSiteRule)) {
-      authConfig.siteRules[params.domain] = params.setSiteRule;
-    }
-  }
-  await saveAuthConfig();
-  return { ok: true, config: authConfig };
 }
 
 async function requestAuth(params) {

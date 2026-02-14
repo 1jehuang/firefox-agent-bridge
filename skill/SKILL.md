@@ -60,8 +60,6 @@ browser <action> '<json_params>'
 | `click` | Click element | `selector`, `text`, or `x`/`y` coords |
 | `type` | Type into focused/selected input | `selector`, `text`, `submit`, `clear` |
 | `fillForm` | Fill form fields (inputs, textareas, selects) | `fields[]` array with selector/value |
-| `uploadFile` | Upload file to a file input element | `selector`, `path` (local file path) |
-| `dropFile` | Simulate drag-and-drop file onto element | `selector` (optional), `path` (local file path) |
 | `waitFor` | Wait for element/text | `selector`, `text`, `timeout` |
 
 #### fillForm - The Right Way to Fill Forms
@@ -83,39 +81,6 @@ browser fillForm '{"fields": [
 
 Works with: `<input>`, `<textarea>`, `<select>`, checkboxes, radio buttons.
 
-#### File Uploads
-
-Two methods for uploading files from the local filesystem:
-
-```bash
-# uploadFile - Sets file on an <input type="file"> element
-# Uses fillForm internally with base64-encoded file data
-browser uploadFile '{"selector": "input[type=file]", "path": "/home/user/document.pdf"}'
-
-# dropFile - Simulates drag-and-drop onto any element
-# Useful when uploadFile doesn't work (e.g. Gmail ignores programmatic file input changes)
-browser dropFile '{"path": "/home/user/document.pdf", "selector": ".drop-zone"}'
-
-# dropFile without selector defaults to [contenteditable="true"] or document.body
-browser dropFile '{"path": "/home/user/image.png"}'
-```
-
-**When to use which:**
-- `uploadFile`: Standard file inputs (`<input type="file">`)
-- `dropFile`: Apps that use drag-and-drop upload zones, or when `uploadFile` doesn't trigger the app's upload handler
-
-The CLI reads the file from disk, base64-encodes it, and auto-detects MIME type from the file extension. Supported types include pdf, png, jpg, gif, txt, html, json, zip, tex, doc, docx.
-
-**Note:** Large files (>1MB) may hit WebSocket message size limits. Compress files before uploading if needed.
-
-#### Reading JSON params from a file
-
-For complex or large JSON params, you can read from a file instead of passing inline:
-
-```bash
-browser someAction '@/path/to/params.json'
-```
-
 ### Control Flow
 
 | Action | Description | Key Params |
@@ -132,7 +97,6 @@ browser someAction '@/path/to/params.json'
 |--------|-------------|------------|
 | `getAuthContext` | Detect login pages, available accounts | - |
 | `requestAuth` | Request user approval for auth | `reason` |
-| `configureAuth` | Set auth preferences | `authMode`, `setSiteRule`, `domain` |
 
 ---
 
@@ -295,33 +259,13 @@ browser getAuthContext '{}'
 
 ---
 
-## Isolated Sessions (for Parallel Execution)
-
-When running multiple tasks in parallel, use `tabId` to avoid conflicts:
-
-```bash
-# 1. Create isolated session - get a unique tabId
-browser newSession '{"url": "https://example.com"}'
-# Returns: {"tabId": 15, "url": "...", "windowId": 1}
-
-# 2. Use that tabId in ALL subsequent commands
-browser navigate '{"url": "https://example.com/page", "tabId": 15}'
-browser getContent '{"format": "annotated", "tabId": 15}'
-browser click '{"selector": "#btn", "tabId": 15}'
-browser type '{"selector": "#input", "text": "hello", "tabId": 15}'
-```
-
-This lets multiple agents work in parallel without stepping on each other.
-
 ## Tips
 
 1. **Start with `listTabs`** to see what's open
 2. **Use `newSession`** for a clean start
-3. **Use `tabId`** for parallel/isolated execution
-4. **Use `annotated` format** - shows content + clickable elements together
-5. **Use selectors from annotated output** - more reliable than text matching
-6. **Fork when uncertain** - try multiple paths, kill the wrong ones
-7. **Never use `sleep` commands** - browser commands are synchronous and wait for completion. Use `waitFor` action if you need to wait for specific elements or text to appear
+3. **Use `annotated` format** - shows content + clickable elements together
+4. **Use selectors from annotated output** - more reliable than text matching
+5. **Fork when uncertain** - try multiple paths, kill the wrong ones
 
 ## Troubleshooting
 

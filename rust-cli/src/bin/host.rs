@@ -9,15 +9,21 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{self, Read, Write as IoWrite};
 use std::path::Path;
-use std::process::Command;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use bronzewarden::config::Config as BwConfig;
+use bronzewarden::crypto::{EncString, MasterKey};
+use bronzewarden::vault::Vault;
+use bronzewarden::api::SyncResponse;
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
+use tokio::process::Command;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 use tokio_tungstenite::accept_async;
@@ -40,6 +46,54 @@ fn request_timeout_ms() -> u64 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(30000)
+}
+
+fn autologin_require_fingerprint() -> bool {
+    env::var("FAB_AUTOLOGIN_REQUIRE_FINGERPRINT")
+        .ok()
+        .map(|v| {
+            let normalized = v.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(true)
+}
+
+fn fingerprint_timeout_ms() -> u64 {
+    env::var("FAB_FINGERPRINT_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20000)
+}
+
+async fn verify_fingerprint() -> Result<(), String> {
+    let user = env::var("USER").map_err(|_| "USER env var is not set for fingerprint verification.")?;
+    let mut cmd = Command::new("fprintd-verify");
+    cmd.arg(&user)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let output = timeout(Duration::from_millis(fingerprint_timeout_ms()), cmd.output())
+        .await
+        .map_err(|_| "Fingerprint verification timed out. Touch the enrolled fingerprint sensor and try again.")?
+        .map_err(|e: std::io::Error| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "fprintd-verify not found. Install fprintd to use fingerprint auth.".to_string()
+            } else {
+                format!("Failed to run fprintd-verify: {}", e)
+            }
+        })?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = stderr.trim().split('\n').rev().find(|l| !l.trim().is_empty())
+        .or_else(|| stdout.trim().split('\n').rev().find(|l| !l.trim().is_empty()))
+        .unwrap_or("verification failed");
+    Err(format!("Fingerprint verification failed: {}", detail))
 }
 
 /// Log to stderr (native messaging uses stdout for messages)
@@ -192,78 +246,159 @@ fn mask_username(username: &str) -> String {
 }
 
 #[derive(Debug)]
-struct GoldwardenCredential {
+struct VaultCredential {
     username: String,
     password: String,
     uri: String,
 }
 
-fn goldwarden_vault_status() -> Result<Value, String> {
-    let output = Command::new("goldwarden")
-        .args(["vault", "status"])
-        .output()
-        .map_err(|e| format!("Failed to run goldwarden: {}", e))?;
+type SharedVault = Arc<RwLock<Option<Vault>>>;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("goldwarden vault status failed: {}", stderr));
-    }
+fn vault_status() -> Result<Value, String> {
+    let config = BwConfig::load().map_err(|e| format!("Failed to load config: {}", e))?;
+    let logged_in = config.is_logged_in();
+    let has_cache = BwConfig::load_vault_cache().is_ok();
+    let login_entries = BwConfig::load_vault_cache()
+        .map(|c| c.ciphers.iter().filter(|c| c.cipher_type == 1 && c.deleted_date.is_none()).count())
+        .unwrap_or(0);
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse vault status: {} (output: {})", e, stdout))
+    Ok(json!({
+        "locked": !has_cache,
+        "loggedIn": logged_in,
+        "loginEntries": login_entries,
+    }))
 }
 
-fn goldwarden_get_login(search: &str) -> Result<GoldwardenCredential, String> {
-    let status = goldwarden_vault_status()?;
-    if status.get("locked").and_then(|v| v.as_bool()).unwrap_or(true) {
-        return Err("Vault is locked. Please unlock Goldwarden first (goldwarden vault unlock)".to_string());
-    }
-    if !status.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false) {
-        return Err("Not logged in to Goldwarden".to_string());
-    }
+fn vault_get_login(vault: &Vault, search: &str) -> Result<VaultCredential, String> {
+    let results = vault.find_by_domain(search);
+    let results = if results.is_empty() {
+        vault.search(search)
+    } else {
+        results
+    };
 
-    let output = Command::new("goldwarden")
-        .args(["logins", "get", "--name", search])
-        .output()
-        .map_err(|e| format!("Failed to query goldwarden: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("No login found for '{}': {}", search, stderr));
+    if results.is_empty() {
+        return Err(format!("No login found for '{}'", search));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.trim().lines().collect();
-
-    let mut username = String::new();
-    let mut password = String::new();
-    let mut uri = String::new();
-
-    for line in &lines {
-        let line = line.trim();
-        if let Some(val) = line.strip_prefix("Username: ") {
-            username = val.to_string();
-        } else if let Some(val) = line.strip_prefix("Password: ") {
-            password = val.to_string();
-        } else if let Some(val) = line.strip_prefix("URI: ") {
-            uri = val.to_string();
-        }
-    }
-
-    if username.is_empty() && password.is_empty() {
-        return Err(format!("Could not parse credentials from goldwarden output: {}", stdout));
-    }
-
-    Ok(GoldwardenCredential { username, password, uri })
+    let cred = &results[0];
+    Ok(VaultCredential {
+        username: cred.username.clone(),
+        password: cred.password.clone(),
+        uri: cred.uris.first().cloned().unwrap_or_else(|| search.to_string()),
+    })
 }
 
-/// Process autoLogin action — query Goldwarden and convert to a secure fill sequence.
+fn read_password_from_env() -> Option<String> {
+    env::var("BW_PASSWORD")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn read_password_from_file() -> Option<String> {
+    let path = env::var("BW_PASSWORD_FILE").ok()?;
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn read_password_from_secret_tool() -> Option<String> {
+    let output = std::process::Command::new("secret-tool")
+        .args([
+            "lookup",
+            "service",
+            "firefox-agent-bridge",
+            "account",
+            "bronzewarden",
+        ])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn resolve_bw_password() -> Result<String, String> {
+    if let Some(pw) = read_password_from_env() {
+        return Ok(pw);
+    }
+    if let Some(pw) = read_password_from_file() {
+        return Ok(pw);
+    }
+    if let Some(pw) = read_password_from_secret_tool() {
+        return Ok(pw);
+    }
+    Err(
+        "No vault password source available. Set BW_PASSWORD, set BW_PASSWORD_FILE, or store password via secret-tool."
+            .to_string(),
+    )
+}
+
+fn unlock_vault_from_sources() -> Result<Vault, String> {
+    let config = BwConfig::load().map_err(|e| format!("Failed to load config: {}", e))?;
+    let email = config.email.as_ref()
+        .ok_or("Not logged in to bronzewarden. Run `bronzewarden login` first.")?;
+    let encrypted_key = config.encrypted_user_key.as_ref()
+        .ok_or("No user key stored. Run `bronzewarden login` first.")?;
+    let kdf_params = config.kdf_params()
+        .ok_or("No KDF params stored.")?;
+
+    let password = resolve_bw_password()?;
+
+    let master_key = MasterKey::derive(&password, email, &kdf_params)
+        .map_err(|e| format!("Key derivation failed: {}", e))?;
+    let stretched = master_key.stretch()
+        .map_err(|e| format!("Key stretch failed: {}", e))?;
+    let user_key = EncString(encrypted_key.clone()).decrypt_to_key(&stretched)
+        .map_err(|e| format!("Failed to decrypt user key: {}", e))?;
+
+    let cache = BwConfig::load_vault_cache()
+        .map_err(|e| format!("Failed to load vault cache: {}. Run `bronzewarden sync` first.", e))?;
+    let sync = SyncResponse {
+        profile: bronzewarden::api::SyncProfile {
+            id: String::new(),
+            email: config.email.clone(),
+            key: config.encrypted_user_key.clone(),
+            private_key: None,
+        },
+        ciphers: cache.ciphers,
+        folders: None,
+    };
+
+    Ok(Vault::new(user_key, &sync))
+}
+
+async fn ensure_vault_unlocked(vault: &SharedVault) -> Result<(), String> {
+    if vault.read().await.is_some() {
+        return Ok(());
+    }
+
+    let unlocked = tokio::task::spawn_blocking(unlock_vault_from_sources)
+        .await
+        .map_err(|e| format!("Unlock task failed: {}", e))??;
+
+    let mut guard = vault.write().await;
+    if guard.is_none() {
+        *guard = Some(unlocked);
+    }
+    Ok(())
+}
+
+/// Process autoLogin action — query bronzewarden vault and convert to a secure fill sequence.
 /// The password NEVER leaves the native host → extension path (never sent to WebSocket client).
 async fn process_auto_login(
     message: &Value,
     native_tx: &NativeTx,
     pending: &PendingMap,
+    vault: &SharedVault,
 ) -> Result<Value, String> {
     let params = message.get("params").ok_or("Missing params")?;
     let domain = params.get("domain")
@@ -282,10 +417,17 @@ async fn process_auto_login(
 
     let submit = params.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
 
-    let cred = tokio::task::spawn_blocking(move || goldwarden_get_login(&search))
-        .await
-        .map_err(|e| format!("Task failed: {}", e))?
-        .map_err(|e| e)?;
+    ensure_vault_unlocked(vault).await?;
+
+    if autologin_require_fingerprint() {
+        verify_fingerprint().await?;
+    }
+
+    let vault_guard = vault.read().await;
+    let v = vault_guard.as_ref()
+        .ok_or("Vault is not unlocked.")?;
+    let cred = vault_get_login(v, &search)?;
+    drop(vault_guard);
 
     let masked = mask_username(&cred.username);
 
@@ -343,6 +485,7 @@ async fn handle_ws_client(
     stream: tokio::net::TcpStream,
     native_tx: NativeTx,
     pending: PendingMap,
+    vault: SharedVault,
 ) {
     let ws_stream = match accept_async(stream).await {
         Ok(ws) => ws,
@@ -412,6 +555,17 @@ async fn handle_ws_client(
 
         let started = Instant::now();
 
+        // Hard policy gate: configureAuth is not allowed via agent-facing API.
+        if message.get("action").and_then(|v| v.as_str()) == Some("configureAuth") {
+            let error_msg = json!({
+                "id": id,
+                "ok": false,
+                "error": "configureAuth is not supported by this host build."
+            });
+            let _ = write.send(Message::Text(error_msg.to_string())).await;
+            continue;
+        }
+
         // Handle uploadFile action
         if message.get("action").and_then(|v| v.as_str()) == Some("uploadFile") {
             if let Err(e) = process_upload_file(&mut message) {
@@ -432,7 +586,7 @@ async fn handle_ws_client(
 
         // Handle autoLogin — intercepted entirely by native host, credentials never sent to WS client
         if message.get("action").and_then(|v| v.as_str()) == Some("autoLogin") {
-            match process_auto_login(&message, &native_tx, &pending).await {
+            match process_auto_login(&message, &native_tx, &pending, &vault).await {
                 Ok(result) => {
                     let response = json!({"id": id, "ok": true, "result": result});
                     let _ = write.send(Message::Text(response.to_string())).await;
@@ -445,15 +599,18 @@ async fn handle_ws_client(
             continue;
         }
 
-        // Handle vaultStatus — check Goldwarden state without exposing secrets
+        // Handle vaultStatus — check bronzewarden state without exposing secrets
         if message.get("action").and_then(|v| v.as_str()) == Some("vaultStatus") {
-            let result = tokio::task::spawn_blocking(goldwarden_vault_status).await;
-            let status_result = match result {
+            let _ = ensure_vault_unlocked(&vault).await;
+            let vault_unlocked = vault.read().await.is_some();
+            let status_result = tokio::task::spawn_blocking(vault_status).await;
+            let status_result = match status_result {
                 Ok(inner) => inner,
                 Err(e) => Err(format!("Task failed: {}", e)),
             };
             match status_result {
-                Ok(status) => {
+                Ok(mut status) => {
+                    status["locked"] = json!(!vault_unlocked);
                     let response = json!({
                         "id": id,
                         "ok": true,
@@ -635,6 +792,18 @@ async fn main() {
     let port = ws_port();
     let addr = format!("{}:{}", host, port);
 
+    // Try to unlock the bronzewarden vault at startup
+    let vault: SharedVault = Arc::new(RwLock::new(None));
+    match unlock_vault_from_sources() {
+        Ok(v) => {
+            log!("Bronzewarden vault unlocked ({} logins)", v.login_count());
+            *vault.write().await = Some(v);
+        }
+        Err(e) => {
+            log!("Vault not unlocked at startup (will retry on demand): {}", e);
+        }
+    }
+
     // Create pending request map
     let pending: PendingMap = Arc::new(RwLock::new(HashMap::new()));
 
@@ -680,8 +849,9 @@ async fn main() {
             Ok((stream, _)) => {
                 let native_tx = native_out_tx.clone();
                 let pending_clone = pending.clone();
+                let vault_clone = vault.clone();
                 tokio::spawn(async move {
-                    handle_ws_client(stream, native_tx, pending_clone).await;
+                    handle_ws_client(stream, native_tx, pending_clone, vault_clone).await;
                 });
             }
             Err(e) => {

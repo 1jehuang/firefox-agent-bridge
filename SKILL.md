@@ -80,7 +80,6 @@ browser <action> '<json_params>'
 |--------|-------------|------------|
 | `getAuthContext` | Detect login pages, available accounts | - |
 | `requestAuth` | Request user approval for auth | `reason` |
-| `configureAuth` | Set auth preferences | `authMode`, `setSiteRule`, `domain` |
 
 ---
 

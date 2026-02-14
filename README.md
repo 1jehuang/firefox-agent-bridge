@@ -4,9 +4,18 @@ Bridge a WebSocket-connected AI agent to a live Firefox profile via a WebExtensi
 
 ## Architecture
 
-- Agent connects to the local WebSocket server.
-- Native messaging host forwards commands to the Firefox extension.
-- Extension executes browser actions and returns results.
+```
+┌─────────────┐     WebSocket      ┌──────────────────┐     Native Messaging     ┌─────────────────┐
+│   Agent     │◄──────────────────►│   Rust Host      │◄───────────────────────►│ Firefox Extension│
+│ (CLI/SDK)   │   ws://127.0.0.1   │ (830KB binary)   │    stdin/stdout JSON    │   (JS required)  │
+└─────────────┘       :8766        └──────────────────┘                         └─────────────────┘
+```
+
+- **Agent** connects to the local WebSocket server
+- **Rust native host** forwards commands to the Firefox extension
+- **Extension** executes browser actions and returns results
+
+The entire bridge is written in Rust except for the browser extension (browsers only support JavaScript extensions).
 
 ## Installation
 
@@ -19,25 +28,31 @@ Download the signed extension from [GitHub Releases](https://github.com/1jehuang
 3. Click gear icon → "Install Add-on From File..."
 4. Select the downloaded XPI
 
-### 2. Install the Native Messaging Host
+### 2. Build and Install the Native Host (Rust)
 
 ```bash
-cd native-host
-npm install
+# Build the Rust binaries
+cd rust-cli
+cargo build --release
+
+# Install native messaging manifest
 cd ..
 ./scripts/install-native-host.sh
 ```
 
-### 3. Install the CLI (for Claude Code)
+### 3. Install the CLI
 
 ```bash
+# Install globally via cargo
 cargo install --path rust-cli
-browser setup claude  # Installs Claude Code skill
+
+# For Claude Code users - install the skill
+browser setup claude
 ```
 
 ### Alternative: Direct WebSocket
 
-Agents can connect directly to `ws://127.0.0.1:8765` and send JSON:
+Agents can connect directly to `ws://127.0.0.1:8766` and send JSON:
 
 ```json
 {"action": "navigate", "params": {"url": "https://example.com"}}
@@ -97,6 +112,20 @@ See `benchmarks/README.md` for the full benchmark suite and setup instructions.
 
 ## Profiling
 
-Use `native-host/profile-client.js` for quick latency stats.
+Use the `--timing` flag for latency breakdown:
+
+```bash
+browser --timing ping
+# {"pong": true, "_timing": {"total_ms": 5, "connect_ms": 0, "roundtrip_ms": 5}}
+```
 
 See `docs/setup.md`, `docs/api.md`, and `docs/performance.md` for full details.
+
+## Binary Sizes
+
+| Binary | Size | Purpose |
+|--------|------|---------|
+| `browser` | 1.2MB | CLI for sending commands |
+| `firefox-agent-bridge-host` | 830KB | Native messaging host |
+
+No Node.js runtime required.

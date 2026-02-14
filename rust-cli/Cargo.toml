@@ -23,7 +23,7 @@ clap = { version = "4", features = ["derive", "cargo"] }
 
 # WebSocket client
 tokio-tungstenite = "0.24"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "io-util", "sync", "net"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "io-util", "sync", "net", "process"] }
 futures-util = "0.3"
 
 # JSON handling
@@ -42,6 +42,10 @@ anyhow = "1"
 
 # Platform-specific home directory
 dirs = "5"
+
+# Vault credential lookup
+bronzewarden = { path = "../../projects/bronzewarden" }
+rpassword = "7"
 
 [dev-dependencies]
 tempfile = "3"

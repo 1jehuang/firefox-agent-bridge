@@ -13,6 +13,25 @@
 
 ## Version History
 
+### v0.8.0 (2026-01-25)
+**Architecture:**
+- **Rust native host** - Replaced Node.js `host.js` with Rust binary (830KB)
+- No Node.js runtime dependency at runtime
+- `browser start` command - Start Firefox and wait for extension connection
+
+**Binary sizes:**
+- `browser` CLI: 1.2MB
+- `firefox-agent-bridge-host`: 830KB
+
+**What remains in JavaScript:**
+- Browser extension only (browsers require JS for extensions)
+
+### v0.7.0 (2026-01-07)
+**Features:**
+- Rust CLI (`browser` command) replacing Node.js client
+- 8.75x faster command execution (12ms vs 105ms per command)
+- `--timing` flag for latency breakdown
+
 ### v0.6.0 (2025-01-04)
 **Features:**
 - `scout` action - Multi-page site exploration with goal-based ranking
