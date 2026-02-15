@@ -74,10 +74,13 @@ browser <action> '<json_params>'
 | `tryUntil` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
 | `parallel` | Run commands on multiple URLs | `branches[]` with url + commands |
 
-### Authentication
+### Authentication & Vault
 
 | Action | Description | Key Params |
 |--------|-------------|------------|
+| `autoLogin` | Auto-fill credentials from Bitwarden vault and optionally submit | `domain`, `submit` (default false) |
+| `vaultStatus` | Check vault lock state and credential count | - |
+| `vaultSync` | Re-sync vault from Bitwarden server via API key | - |
 | `getAuthContext` | Detect login pages, available accounts | - |
 | `requestAuth` | Request user approval for auth | `reason` |
 
@@ -229,15 +232,46 @@ browser parallel '{
 
 ---
 
-## Authentication
+## Authentication (Autonomous Login)
 
-The bridge detects auth pages and leverages existing browser sessions:
+The bridge integrates with a Bitwarden vault (via bronzewarden) for fully autonomous credential fill. No human interaction needed.
+
+### Auto-Login Flow
 
 ```bash
-# Check if on login page
-browser getAuthContext '{}'
+# 1. Navigate to the site
+browser navigate '{"url": "https://github.com"}'
 
-# Returns available accounts, OAuth options, etc.
+# 2. Auto-fill credentials (looks up domain in vault, fills form)
+browser autoLogin '{"domain": "github.com", "submit": false}'
+# Returns: {"filled": true, "maskedUsername": "j***1", "matchedUri": "https://github.com/"}
+
+# 3. Or auto-fill AND submit in one step
+browser autoLogin '{"domain": "github.com", "submit": true}'
+```
+
+### Vault Management
+
+```bash
+# Check vault status
+browser vaultStatus '{}'
+# Returns: {"locked": false, "entries": 322}
+
+# Re-sync vault from server (if credentials were updated)
+browser vaultSync '{}'
+# Returns: {"synced": true, "entries": 322}
+```
+
+### How It Works
+- Credentials are stored in Bitwarden and decrypted locally by the native host
+- The `autoLogin` action sends credentials directly to the extension via the native messaging channel (never over WebSocket)
+- Vault is auto-unlocked at host startup using a master password from the system keyring
+
+### Legacy Auth Detection
+
+```bash
+# Detect login pages and available accounts
+browser getAuthContext '{}'
 ```
 
 ---
