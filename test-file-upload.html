@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Upload Tests - Twitter-like Patterns</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+    h1 { color: #1d9bf0; }
+    section { margin: 30px 0; padding: 20px; background: white; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    h2 { margin-top: 0; color: #0f1419; font-size: 18px; }
+    .result { margin-top: 15px; padding: 12px; background: #f7f9fa; border-radius: 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+    .success { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+    .error { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; border: none; border-radius: 20px; font-weight: 600; }
+    button.primary { background: #1d9bf0; color: white; }
+    button.primary:hover { background: #1a8cd8; }
+    button.secondary { background: #eff3f4; color: #0f1419; }
+
+    /* Twitter-like compose box */
+    .compose-box { border: 1px solid #cfd9de; border-radius: 16px; padding: 12px; }
+    .compose-input { width: 100%; border: none; resize: none; font-size: 18px; min-height: 80px; outline: none; }
+    .compose-toolbar { display: flex; align-items: center; border-top: 1px solid #eff3f4; padding-top: 12px; margin-top: 12px; }
+    .toolbar-btn { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #1d9bf0; }
+    .toolbar-btn:hover { background: rgba(29, 155, 240, 0.1); }
+    .toolbar-btn svg { width: 20px; height: 20px; }
+
+    /* Preview area */
+    .preview-area { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .preview-item { position: relative; width: 120px; height: 120px; border-radius: 12px; overflow: hidden; }
+    .preview-item img { width: 100%; height: 100%; object-fit: cover; }
+    .preview-item .remove-btn { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; background: rgba(0,0,0,0.7); color: white; border-radius: 50%; border: none; cursor: pointer; font-size: 14px; }
+    .preview-item .file-info { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; font-size: 11px; }
+
+    /* Drag and drop */
+    .drop-zone { border: 2px dashed #cfd9de; border-radius: 12px; padding: 40px; text-align: center; color: #536471; transition: all 0.2s; }
+    .drop-zone.dragover { border-color: #1d9bf0; background: rgba(29, 155, 240, 0.1); color: #1d9bf0; }
+
+    /* Hidden inputs indicator */
+    .hidden-input-indicator { display: inline-block; padding: 4px 8px; background: #fff3cd; border-radius: 4px; font-size: 12px; color: #856404; }
+  </style>
+</head>
+<body>
+  <h1>🐦 File Upload Tests</h1>
+  <p>Test file upload patterns commonly found on Twitter and similar sites.</p>
+
+  <!-- Test 1: Twitter-like Media Upload -->
+  <section id="test-twitter-upload">
+    <h2>1. Twitter-like Media Upload (Hidden Input + Button Trigger)</h2>
+    <p>Click the media button (📷) to upload. The file input is hidden - this is exactly how Twitter works.</p>
+    <p><span class="hidden-input-indicator">⚠️ File input is hidden (display: none)</span></p>
+
+    <div class="compose-box">
+      <textarea class="compose-input" id="tweet-text" placeholder="What's happening?"></textarea>
+      <div id="twitter-preview" class="preview-area"></div>
+      <div class="compose-toolbar">
+        <div class="toolbar-btn" id="media-btn" title="Add media">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 5.5C3 4.119 4.119 3 5.5 3h13C19.881 3 21 4.119 21 5.5v13c0 1.381-1.119 2.5-2.5 2.5h-13C4.119 21 3 19.881 3 18.5v-13zM5.5 5c-.276 0-.5.224-.5.5v9.086l3-3 3 3 5-5 3 3V5.5c0-.276-.224-.5-.5-.5h-13zM19 15.414l-3-3-5 5-3-3-3 3V18.5c0 .276.224.5.5.5h13c.276 0 .5-.224.5-.5v-3.086zM9.75 7C8.784 7 8 7.784 8 8.75s.784 1.75 1.75 1.75 1.75-.784 1.75-1.75S10.716 7 9.75 7z"/>
+          </svg>
+        </div>
+        <div style="flex: 1;"></div>
+        <button class="primary" id="post-btn">Post</button>
+      </div>
+    </div>
+
+    <!-- Hidden file input - exactly like Twitter -->
+    <input type="file" id="twitter-file-input" accept="image/*,video/*,.gif" multiple style="display: none;">
+
+    <div id="twitter-result" class="result">No files uploaded yet. Click 📷 or use: browser uploadFile '{"selector": "#twitter-file-input", "path": "/path/to/image.png"}'</div>
+
+    <script>
+      const twitterInput = document.getElementById('twitter-file-input');
+      const mediaBtn = document.getElementById('media-btn');
+      const twitterPreview = document.getElementById('twitter-preview');
+      const twitterResult = document.getElementById('twitter-result');
+
+      mediaBtn.addEventListener('click', () => twitterInput.click());
+
+      twitterInput.addEventListener('change', function(e) {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+
+        twitterResult.textContent = `Uploaded ${files.length} file(s):\n` +
+          files.map(f => `  - ${f.name} (${f.type}, ${f.size} bytes)`).join('\n');
+        twitterResult.className = 'result success';
+
+        // Show previews
+        twitterPreview.innerHTML = '';
+        files.forEach((file, i) => {
+          const div = document.createElement('div');
+          div.className = 'preview-item';
+
+          if (file.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(file);
+            div.appendChild(img);
+          }
+
+          const info = document.createElement('div');
+          info.className = 'file-info';
+          info.textContent = file.name.slice(0, 15) + (file.name.length > 15 ? '...' : '');
+          div.appendChild(info);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.className = 'remove-btn';
+          removeBtn.textContent = '×';
+          removeBtn.onclick = () => div.remove();
+          div.appendChild(removeBtn);
+
+          twitterPreview.appendChild(div);
+        });
+      });
+    </script>
+  </section>
+
+  <!-- Test 2: Drag and Drop Upload (like Twitter's DnD) -->
+  <section id="test-drag-drop">
+    <h2>2. Drag and Drop Upload</h2>
+    <p>Drag files onto the drop zone. Also has a hidden file input.</p>
+
+    <div class="drop-zone" id="drop-zone">
+      <p>📁 Drag and drop files here</p>
+      <p>or <a href="#" id="browse-link">browse</a></p>
+    </div>
+    <input type="file" id="drop-file-input" multiple style="display: none;">
+
+    <div id="drop-result" class="result">No files dropped. Use: browser uploadFile '{"selector": "#drop-file-input", "path": "/path/to/file"}'</div>
+
+    <script>
+      const dropZone = document.getElementById('drop-zone');
+      const dropInput = document.getElementById('drop-file-input');
+      const dropResult = document.getElementById('drop-result');
+      const browseLink = document.getElementById('browse-link');
+
+      browseLink.addEventListener('click', (e) => { e.preventDefault(); dropInput.click(); });
+
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        handleDropFiles(e.dataTransfer.files);
+      });
+
+      dropInput.addEventListener('change', (e) => handleDropFiles(e.target.files));
+
+      function handleDropFiles(files) {
+        const arr = Array.from(files);
+        if (arr.length === 0) return;
+        dropResult.textContent = `Received ${arr.length} file(s):\n` +
+          arr.map(f => `  - ${f.name} (${f.type}, ${f.size} bytes)`).join('\n');
+        dropResult.className = 'result success';
+      }
+    </script>
+  </section>
+
+  <!-- Test 3: File Input with Accept Attribute -->
+  <section id="test-accept-attribute">
+    <h2>3. File Input with Accept Restrictions</h2>
+    <p>This input only accepts PDFs - test that MIME type is correctly set.</p>
+
+    <input type="file" id="pdf-input" accept=".pdf,application/pdf">
+    <div id="pdf-result" class="result">Select a PDF file. Use: browser uploadFile '{"selector": "#pdf-input", "path": "/path/to/doc.pdf"}'</div>
+
+    <script>
+      document.getElementById('pdf-input').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+          document.getElementById('pdf-result').textContent =
+            `File: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\nIs PDF: ${isPdf}`;
+          document.getElementById('pdf-result').className = isPdf ? 'result success' : 'result error';
+        }
+      });
+    </script>
+  </section>
+
+  <!-- Test 4: Multiple File Inputs (like attachment + profile pic) -->
+  <section id="test-multiple-inputs">
+    <h2>4. Multiple File Inputs on Same Page</h2>
+    <p>Test that uploadFile can target specific inputs when multiple exist.</p>
+
+    <div style="display: flex; gap: 20px;">
+      <div>
+        <label>Profile Picture:</label><br>
+        <input type="file" id="profile-pic" name="profile" accept="image/*">
+      </div>
+      <div>
+        <label>Cover Image:</label><br>
+        <input type="file" id="cover-image" name="cover" accept="image/*">
+      </div>
+      <div>
+        <label>Document:</label><br>
+        <input type="file" id="document-upload" name="document">
+      </div>
+    </div>
+
+    <div id="multi-result" class="result">Upload to specific inputs:
+- Profile: browser uploadFile '{"selector": "#profile-pic", "path": "..."}'
+- Cover: browser uploadFile '{"selector": "#cover-image", "path": "..."}'
+- Doc: browser uploadFile '{"selector": "#document-upload", "path": "..."}'</div>
+
+    <script>
+      ['profile-pic', 'cover-image', 'document-upload'].forEach(id => {
+        document.getElementById(id).addEventListener('change', function(e) {
+          const file = e.target.files[0];
+          if (file) {
+            document.getElementById('multi-result').textContent =
+              `Uploaded to ${id}:\n  ${file.name} (${file.type}, ${file.size} bytes)`;
+            document.getElementById('multi-result').className = 'result success';
+          }
+        });
+      });
+    </script>
+  </section>
+
+  <!-- Test 5: Form with File + Other Fields -->
+  <section id="test-form-with-file">
+    <h2>5. Form with File and Other Fields</h2>
+    <p>Test filling a complete form including file upload.</p>
+
+    <form id="complete-form">
+      <div style="margin-bottom: 10px;">
+        <label>Title:</label><br>
+        <input type="text" id="form-title" name="title" placeholder="Enter title">
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label>Description:</label><br>
+        <textarea id="form-desc" name="description" placeholder="Enter description"></textarea>
+      </div>
+      <div style="margin-bottom: 10px;">
+        <label>Attachment:</label><br>
+        <input type="file" id="form-file" name="attachment">
+      </div>
+      <button type="button" class="primary" onclick="submitForm()">Submit</button>
+    </form>
+
+    <div id="form-result" class="result">Fill form with:
+browser fillForm '{"fields": [
+  {"selector": "#form-title", "value": "My Title"},
+  {"selector": "#form-desc", "value": "My Description"}
+]}'
+browser uploadFile '{"selector": "#form-file", "path": "/path/to/file"}'</div>
+
+    <script>
+      function submitForm() {
+        const title = document.getElementById('form-title').value;
+        const desc = document.getElementById('form-desc').value;
+        const file = document.getElementById('form-file').files[0];
+
+        let result = `Form submitted:\n  Title: "${title}"\n  Description: "${desc}"`;
+        if (file) {
+          result += `\n  File: ${file.name} (${file.size} bytes)`;
+        } else {
+          result += `\n  File: (none)`;
+        }
+
+        document.getElementById('form-result').textContent = result;
+        document.getElementById('form-result').className = (title && file) ? 'result success' : 'result';
+      }
+    </script>
+  </section>
+
+  <!-- Test 6: Canvas File API Test -->
+  <section id="test-canvas-style">
+    <h2>6. Canvas-style Document Embed (RCE Pattern)</h2>
+    <p>Simulates Canvas LMS upload where file goes into rich text editor.</p>
+
+    <div style="border: 1px solid #ccc; padding: 10px; border-radius: 8px;">
+      <div style="background: #f5f5f5; padding: 8px; margin-bottom: 10px;">
+        <button type="button" class="secondary" id="insert-doc-btn">📄 Insert Document</button>
+      </div>
+      <div id="canvas-editor" contenteditable="true" style="min-height: 100px; padding: 10px; border: 1px solid #ddd;">
+        Type your submission here...
+      </div>
+    </div>
+
+    <!-- Hidden file input for document insertion -->
+    <input type="file" id="canvas-file-input" accept=".pdf,.doc,.docx,.txt" style="display: none;">
+
+    <div id="canvas-result" class="result">Insert document: browser uploadFile '{"selector": "#canvas-file-input", "path": "/path/to/document.pdf"}'</div>
+
+    <script>
+      const canvasEditor = document.getElementById('canvas-editor');
+      const canvasInput = document.getElementById('canvas-file-input');
+      const insertDocBtn = document.getElementById('insert-doc-btn');
+
+      insertDocBtn.addEventListener('click', () => canvasInput.click());
+
+      canvasInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          // Insert a document link into the editor (like Canvas does)
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(file);
+          link.textContent = `📄 ${file.name}`;
+          link.style.cssText = 'display: inline-block; padding: 4px 8px; background: #e3f2fd; border-radius: 4px; text-decoration: none; margin: 4px;';
+
+          canvasEditor.appendChild(link);
+
+          document.getElementById('canvas-result').textContent =
+            `Document inserted: ${file.name} (${file.type}, ${file.size} bytes)`;
+          document.getElementById('canvas-result').className = 'result success';
+        }
+      });
+    </script>
+  </section>
+
+  <!-- Test Results Summary -->
+  <section id="test-summary">
+    <h2>📊 Test Summary</h2>
+    <p>Run these commands to test the uploadFile action:</p>
+    <pre style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 8px; overflow-x: auto;">
+# First, open this page
+browser navigate '{"url": "file:///home/jeremy/firefox-agent-bridge/test-file-upload.html"}'
+
+# Test 1: Twitter-style hidden input
+browser uploadFile '{"selector": "#twitter-file-input", "path": "/path/to/image.png"}'
+
+# Test 2: Drag-drop hidden input
+browser uploadFile '{"selector": "#drop-file-input", "path": "/path/to/file.txt"}'
+
+# Test 3: PDF-only input
+browser uploadFile '{"selector": "#pdf-input", "path": "/path/to/document.pdf"}'
+
+# Test 4: Multiple inputs - target specific one
+browser uploadFile '{"selector": "#profile-pic", "path": "/path/to/avatar.jpg"}'
+
+# Test 5: Form file field
+browser fillForm '{"fields": [{"selector": "#form-title", "value": "Test"}, {"selector": "#form-desc", "value": "Description"}]}'
+browser uploadFile '{"selector": "#form-file", "path": "/path/to/attachment.pdf"}'
+
+# Test 6: Canvas-style document embed
+browser uploadFile '{"selector": "#canvas-file-input", "path": "/path/to/homework.pdf"}'
+    </pre>
+
+    <h3>What makes Twitter-style uploads tricky:</h3>
+    <ul>
+      <li><strong>Hidden input:</strong> The file input has <code>display: none</code></li>
+      <li><strong>Button trigger:</strong> A visible button calls <code>input.click()</code></li>
+      <li><strong>Event listeners:</strong> The <code>change</code> event must fire to update UI</li>
+      <li><strong>DataTransfer API:</strong> Setting <code>input.files</code> requires DataTransfer</li>
+    </ul>
+
+    <p>The <code>uploadFile</code> action handles all of this by:</p>
+    <ol>
+      <li>Finding the file input (even if hidden)</li>
+      <li>Creating a File object from base64 data</li>
+      <li>Using DataTransfer to set <code>input.files</code></li>
+      <li>Dispatching <code>change</code> and <code>input</code> events</li>
+    </ol>
+  </section>
+
+</body>
+</html>

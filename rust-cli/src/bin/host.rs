@@ -14,10 +14,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bronzewarden::api::{BitwardenApi, SyncResponse};
 use bronzewarden::config::Config as BwConfig;
 use bronzewarden::crypto::{EncString, MasterKey};
 use bronzewarden::vault::Vault;
-use bronzewarden::api::SyncResponse;
 
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
@@ -254,6 +254,58 @@ struct VaultCredential {
 
 type SharedVault = Arc<RwLock<Option<Vault>>>;
 
+fn read_secret_tool(service: &str, account: &str) -> Option<String> {
+    let output = std::process::Command::new("secret-tool")
+        .args(["lookup", "service", service, "account", account])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() { None } else { Some(value) }
+}
+
+async fn sync_vault_with_api_key() -> Result<(), String> {
+    let client_id = read_secret_tool("bronzewarden", "client_id")
+        .ok_or("No API client_id in keyring")?;
+    let client_secret = read_secret_tool("bronzewarden", "client_secret")
+        .ok_or("No API client_secret in keyring")?;
+
+    let mut config = BwConfig::load().map_err(|e| format!("Config load: {}", e))?;
+    let api = BitwardenApi::new(&config.identity_url, &config.api_url, &config.device_id);
+
+    let token = api.login_with_api_key(&client_id, &client_secret).await
+        .map_err(|e| format!("API key login: {}", e))?;
+
+    config.access_token = Some(token.access_token.clone());
+    config.refresh_token = token.refresh_token;
+    if let Some(ref key) = token.key {
+        config.encrypted_user_key = Some(key.clone());
+    }
+    if token.kdf.is_some() { config.kdf_type = token.kdf; }
+    if token.kdf_iterations.is_some() { config.kdf_iterations = token.kdf_iterations; }
+    if token.kdf_memory.is_some() { config.kdf_memory = token.kdf_memory; }
+    if token.kdf_parallelism.is_some() { config.kdf_parallelism = token.kdf_parallelism; }
+
+    let sync = api.sync(&token.access_token).await
+        .map_err(|e| format!("Vault sync: {}", e))?;
+
+    if let Some(ref profile_key) = sync.profile.key {
+        config.encrypted_user_key = Some(profile_key.clone());
+    }
+
+    config.save_vault_cache(&sync.ciphers)
+        .map_err(|e| format!("Save cache: {}", e))?;
+    config.save().map_err(|e| format!("Save config: {}", e))?;
+
+    let login_count = sync.ciphers.iter()
+        .filter(|c| c.cipher_type == 1 && c.deleted_date.is_none())
+        .count();
+    log!("Vault synced via API key: {} items ({} logins)", sync.ciphers.len(), login_count);
+    Ok(())
+}
+
 fn vault_status() -> Result<Value, String> {
     let config = BwConfig::load().map_err(|e| format!("Failed to load config: {}", e))?;
     let logged_in = config.is_logged_in();
@@ -305,25 +357,7 @@ fn read_password_from_file() -> Option<String> {
 }
 
 fn read_password_from_secret_tool() -> Option<String> {
-    let output = std::process::Command::new("secret-tool")
-        .args([
-            "lookup",
-            "service",
-            "firefox-agent-bridge",
-            "account",
-            "bronzewarden",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if value.is_empty() {
-        None
-    } else {
-        Some(value)
-    }
+    read_secret_tool("firefox-agent-bridge", "bronzewarden")
 }
 
 fn resolve_bw_password() -> Result<String, String> {
@@ -620,6 +654,32 @@ async fn handle_ws_client(
                             "loginEntries": status.get("loginEntries").and_then(|v| v.as_u64()).unwrap_or(0),
                         }
                     });
+                    let _ = write.send(Message::Text(response.to_string())).await;
+                }
+                Err(e) => {
+                    let error_msg = json!({"id": id, "ok": false, "error": e});
+                    let _ = write.send(Message::Text(error_msg.to_string())).await;
+                }
+            }
+            continue;
+        }
+
+        // Handle vaultSync — re-sync vault via API key and re-unlock
+        if message.get("action").and_then(|v| v.as_str()) == Some("vaultSync") {
+            let vault_clone = vault.clone();
+            let sync_result = async {
+                sync_vault_with_api_key().await?;
+                // Clear cached vault so it re-unlocks with fresh data
+                *vault_clone.write().await = None;
+                ensure_vault_unlocked(&vault_clone).await?;
+                let count = vault_clone.read().await.as_ref()
+                    .map(|v| v.login_count()).unwrap_or(0);
+                Ok::<_, String>(count)
+            }.await;
+
+            match sync_result {
+                Ok(count) => {
+                    let response = json!({"id": id, "ok": true, "result": {"synced": true, "loginEntries": count}});
                     let _ = write.send(Message::Text(response.to_string())).await;
                 }
                 Err(e) => {

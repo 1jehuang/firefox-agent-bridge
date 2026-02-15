@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Agent Bridge - Challenge Tests</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; }
+    section { margin: 30px 0; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+    h2 { margin-top: 0; color: #333; }
+    .result { margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+    .success { background: #d4edda; color: #155724; }
+    .error { background: #f8d7da; color: #721c24; }
+    button { padding: 8px 16px; margin: 5px; cursor: pointer; }
+    input, textarea, select { padding: 8px; margin: 5px 0; }
+
+    /* Custom select styling */
+    .custom-select-wrapper { position: relative; display: inline-block; }
+    .custom-select { padding: 10px; border: 1px solid #ccc; cursor: pointer; background: white; min-width: 200px; }
+    .custom-options { display: none; position: absolute; background: white; border: 1px solid #ccc; width: 100%; z-index: 100; }
+    .custom-options.open { display: block; }
+    .custom-option { padding: 10px; cursor: pointer; }
+    .custom-option:hover { background: #f0f0f0; }
+
+    /* Modal styling */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; }
+    .modal-overlay.open { display: flex; justify-content: center; align-items: center; }
+    .modal { background: white; padding: 30px; border-radius: 8px; max-width: 400px; }
+
+    /* Drag and drop */
+    .drag-container { display: flex; gap: 20px; }
+    .drop-zone { width: 150px; height: 150px; border: 2px dashed #ccc; display: flex; align-items: center; justify-content: center; }
+    .drop-zone.dragover { border-color: #007bff; background: #e3f2fd; }
+    .draggable { padding: 10px 20px; background: #007bff; color: white; cursor: grab; }
+    .draggable.dragging { opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <h1>Browser Agent Bridge - Challenge Tests</h1>
+  <p>Test various challenging UI patterns to identify areas for improvement.</p>
+
+  <!-- Test 1: File Upload -->
+  <section id="test-file-upload">
+    <h2>1. File Upload</h2>
+    <p>Test: Upload a file using the file input.</p>
+    <input type="file" id="file-input" accept=".txt,.pdf,.png,.jpg">
+    <div id="file-result" class="result">No file selected</div>
+    <script>
+      document.getElementById('file-input').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          document.getElementById('file-result').textContent = `Selected: ${file.name} (${file.size} bytes, ${file.type})`;
+          document.getElementById('file-result').className = 'result success';
+        }
+      });
+    </script>
+  </section>
+
+  <!-- Test 2: Rich Text Editor (contenteditable) -->
+  <section id="test-rich-text">
+    <h2>2. Rich Text Editor (contenteditable)</h2>
+    <p>Test: Type text into this rich text editor.</p>
+    <div id="rich-editor" contenteditable="true" style="border: 1px solid #ccc; padding: 15px; min-height: 100px; border-radius: 4px;">
+      Click here and type...
+    </div>
+    <button onclick="document.getElementById('rich-text-result').textContent = 'Content: ' + document.getElementById('rich-editor').innerHTML; document.getElementById('rich-text-result').className = 'result success';">
+      Check Content
+    </button>
+    <div id="rich-text-result" class="result">Click button to check content</div>
+  </section>
+
+  <!-- Test 3: Rich Text Editor in iframe (like TinyMCE) -->
+  <section id="test-iframe-editor">
+    <h2>3. Iframe Editor (TinyMCE-like)</h2>
+    <p>Test: Type into the iframe editor.</p>
+    <iframe id="editor-iframe" style="width: 100%; height: 150px; border: 1px solid #ccc;"></iframe>
+    <button onclick="checkIframeContent()">Check Iframe Content</button>
+    <div id="iframe-result" class="result">Click button to check content</div>
+    <script>
+      // Initialize iframe with editable document
+      const iframe = document.getElementById('editor-iframe');
+      iframe.onload = function() {
+        const doc = iframe.contentDocument;
+        doc.designMode = 'on';
+        doc.body.innerHTML = '<p>Type in iframe...</p>';
+      };
+      // Trigger load for about:blank
+      iframe.src = 'about:blank';
+
+      function checkIframeContent() {
+        const content = iframe.contentDocument.body.innerHTML;
+        document.getElementById('iframe-result').textContent = 'Iframe content: ' + content;
+        document.getElementById('iframe-result').className = 'result success';
+      }
+    </script>
+  </section>
+
+  <!-- Test 4: Custom Select (non-native dropdown) -->
+  <section id="test-custom-select">
+    <h2>4. Custom Select Dropdown</h2>
+    <p>Test: Select an option from this custom dropdown (not a native &lt;select&gt;).</p>
+    <div class="custom-select-wrapper">
+      <div class="custom-select" id="custom-select" onclick="toggleCustomSelect()">
+        Select an option...
+      </div>
+      <div class="custom-options" id="custom-options">
+        <div class="custom-option" data-value="opt1" onclick="selectCustomOption('Option 1', 'opt1')">Option 1</div>
+        <div class="custom-option" data-value="opt2" onclick="selectCustomOption('Option 2', 'opt2')">Option 2</div>
+        <div class="custom-option" data-value="opt3" onclick="selectCustomOption('Option 3', 'opt3')">Option 3</div>
+      </div>
+    </div>
+    <input type="hidden" id="custom-select-value" name="custom-select">
+    <div id="custom-select-result" class="result">No selection made</div>
+    <script>
+      function toggleCustomSelect() {
+        document.getElementById('custom-options').classList.toggle('open');
+      }
+      function selectCustomOption(text, value) {
+        document.getElementById('custom-select').textContent = text;
+        document.getElementById('custom-select-value').value = value;
+        document.getElementById('custom-options').classList.remove('open');
+        document.getElementById('custom-select-result').textContent = `Selected: ${text} (value: ${value})`;
+        document.getElementById('custom-select-result').className = 'result success';
+      }
+      // Close on outside click
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.custom-select-wrapper')) {
+          document.getElementById('custom-options').classList.remove('open');
+        }
+      });
+    </script>
+  </section>
+
+  <!-- Test 5: Modal Dialog -->
+  <section id="test-modal">
+    <h2>5. Modal Dialog</h2>
+    <p>Test: Open modal, fill form, and submit.</p>
+    <button id="open-modal-btn" onclick="document.getElementById('modal-overlay').classList.add('open')">Open Modal</button>
+    <div id="modal-result" class="result">Modal not opened yet</div>
+
+    <div id="modal-overlay" class="modal-overlay">
+      <div class="modal">
+        <h3>Modal Form</h3>
+        <input type="text" id="modal-input" placeholder="Enter something...">
+        <br><br>
+        <button id="modal-submit" onclick="submitModal()">Submit</button>
+        <button onclick="document.getElementById('modal-overlay').classList.remove('open')">Cancel</button>
+      </div>
+    </div>
+    <script>
+      function submitModal() {
+        const value = document.getElementById('modal-input').value;
+        document.getElementById('modal-result').textContent = `Modal submitted with: "${value}"`;
+        document.getElementById('modal-result').className = 'result success';
+        document.getElementById('modal-overlay').classList.remove('open');
+      }
+    </script>
+  </section>
+
+  <!-- Test 6: Drag and Drop -->
+  <section id="test-drag-drop">
+    <h2>6. Drag and Drop</h2>
+    <p>Test: Drag the item to the drop zone.</p>
+    <div class="drag-container">
+      <div class="drop-zone" id="source-zone">
+        <div class="draggable" id="drag-item" draggable="true">Drag Me</div>
+      </div>
+      <div class="drop-zone" id="target-zone">Drop Here</div>
+    </div>
+    <div id="drag-result" class="result">Item not moved yet</div>
+    <script>
+      const dragItem = document.getElementById('drag-item');
+      const targetZone = document.getElementById('target-zone');
+
+      dragItem.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', 'drag-item');
+        dragItem.classList.add('dragging');
+      });
+      dragItem.addEventListener('dragend', () => dragItem.classList.remove('dragging'));
+
+      targetZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        targetZone.classList.add('dragover');
+      });
+      targetZone.addEventListener('dragleave', () => targetZone.classList.remove('dragover'));
+      targetZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        targetZone.classList.remove('dragover');
+        targetZone.innerHTML = '';
+        targetZone.appendChild(dragItem);
+        document.getElementById('drag-result').textContent = 'Item successfully dropped!';
+        document.getElementById('drag-result').className = 'result success';
+      });
+    </script>
+  </section>
+
+  <!-- Test 7: Keyboard Events -->
+  <section id="test-keyboard">
+    <h2>7. Keyboard Events</h2>
+    <p>Test: Press Enter in this field to submit, or press Escape to clear.</p>
+    <input type="text" id="keyboard-input" placeholder="Type and press Enter or Escape" style="width: 300px;">
+    <div id="keyboard-result" class="result">Waiting for key press...</div>
+    <script>
+      document.getElementById('keyboard-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          document.getElementById('keyboard-result').textContent = `Enter pressed! Value: "${this.value}"`;
+          document.getElementById('keyboard-result').className = 'result success';
+        } else if (e.key === 'Escape') {
+          this.value = '';
+          document.getElementById('keyboard-result').textContent = 'Escape pressed - field cleared';
+          document.getElementById('keyboard-result').className = 'result';
+        }
+      });
+    </script>
+  </section>
+
+  <!-- Test 8: Auto-complete / Typeahead -->
+  <section id="test-autocomplete">
+    <h2>8. Auto-complete / Typeahead</h2>
+    <p>Test: Type to search and select from suggestions.</p>
+    <input type="text" id="autocomplete-input" placeholder="Type a fruit name..." autocomplete="off" style="width: 300px;">
+    <div id="autocomplete-suggestions" style="border: 1px solid #ccc; display: none; max-height: 150px; overflow-y: auto;"></div>
+    <div id="autocomplete-result" class="result">No selection made</div>
+    <script>
+      const fruits = ['Apple', 'Apricot', 'Banana', 'Blueberry', 'Cherry', 'Coconut', 'Date', 'Fig', 'Grape', 'Kiwi', 'Lemon', 'Mango', 'Orange', 'Papaya', 'Peach', 'Pear', 'Pineapple', 'Plum', 'Raspberry', 'Strawberry'];
+      const acInput = document.getElementById('autocomplete-input');
+      const acSuggestions = document.getElementById('autocomplete-suggestions');
+
+      acInput.addEventListener('input', function() {
+        const query = this.value.toLowerCase();
+        if (query.length < 1) {
+          acSuggestions.style.display = 'none';
+          return;
+        }
+        const matches = fruits.filter(f => f.toLowerCase().includes(query));
+        if (matches.length > 0) {
+          acSuggestions.innerHTML = matches.map(m =>
+            `<div class="autocomplete-item" style="padding: 8px; cursor: pointer;" onclick="selectAutocomplete('${m}')">${m}</div>`
+          ).join('');
+          acSuggestions.style.display = 'block';
+        } else {
+          acSuggestions.style.display = 'none';
+        }
+      });
+
+      function selectAutocomplete(value) {
+        acInput.value = value;
+        acSuggestions.style.display = 'none';
+        document.getElementById('autocomplete-result').textContent = `Selected: ${value}`;
+        document.getElementById('autocomplete-result').className = 'result success';
+      }
+    </script>
+  </section>
+
+  <!-- Test 9: Shadow DOM -->
+  <section id="test-shadow-dom">
+    <h2>9. Shadow DOM Component</h2>
+    <p>Test: Interact with elements inside Shadow DOM.</p>
+    <div id="shadow-host"></div>
+    <div id="shadow-result" class="result">Shadow DOM not interacted with</div>
+    <script>
+      // Create a custom element with shadow DOM
+      class ShadowInput extends HTMLElement {
+        constructor() {
+          super();
+          const shadow = this.attachShadow({ mode: 'open' });
+          shadow.innerHTML = `
+            <style>
+              input { padding: 10px; border: 2px solid #007bff; border-radius: 4px; }
+              button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; margin-left: 10px; }
+            </style>
+            <input type="text" id="shadow-input" placeholder="Inside shadow DOM">
+            <button id="shadow-btn">Submit</button>
+          `;
+          shadow.getElementById('shadow-btn').addEventListener('click', () => {
+            const val = shadow.getElementById('shadow-input').value;
+            document.getElementById('shadow-result').textContent = `Shadow DOM submitted: "${val}"`;
+            document.getElementById('shadow-result').className = 'result success';
+          });
+        }
+      }
+      customElements.define('shadow-input', ShadowInput);
+      document.getElementById('shadow-host').innerHTML = '<shadow-input></shadow-input>';
+    </script>
+  </section>
+
+  <!-- Test 10: Delayed Content (AJAX-like) -->
+  <section id="test-delayed">
+    <h2>10. Delayed/Dynamic Content</h2>
+    <p>Test: Click button, wait for content to load, then interact with it.</p>
+    <button id="load-content-btn" onclick="loadDelayedContent()">Load Content</button>
+    <div id="delayed-container"></div>
+    <div id="delayed-result" class="result">Content not loaded yet</div>
+    <script>
+      function loadDelayedContent() {
+        document.getElementById('delayed-container').innerHTML = '<p>Loading...</p>';
+        setTimeout(() => {
+          document.getElementById('delayed-container').innerHTML = `
+            <input type="text" id="delayed-input" placeholder="Dynamically loaded input">
+            <button id="delayed-submit" onclick="submitDelayed()">Submit</button>
+          `;
+        }, 2000);
+      }
+      function submitDelayed() {
+        const val = document.getElementById('delayed-input').value;
+        document.getElementById('delayed-result').textContent = `Delayed content submitted: "${val}"`;
+        document.getElementById('delayed-result').className = 'result success';
+      }
+    </script>
+  </section>
+
+  <section id="summary">
+    <h2>Summary</h2>
+    <p>Challenges tested:</p>
+    <ol>
+      <li><strong>File Upload</strong> - Need to send base64 file data</li>
+      <li><strong>Rich Text (contenteditable)</strong> - Standard selectors work, but typing requires focus</li>
+      <li><strong>Iframe Editor</strong> - Need special handling for cross-document content</li>
+      <li><strong>Custom Select</strong> - Need to click trigger, then click option</li>
+      <li><strong>Modal Dialog</strong> - Need to wait for modal to open, find elements inside</li>
+      <li><strong>Drag and Drop</strong> - Requires synthesizing drag events</li>
+      <li><strong>Keyboard Events</strong> - Need dedicated key press command</li>
+      <li><strong>Auto-complete</strong> - Need to type, wait for suggestions, click suggestion</li>
+      <li><strong>Shadow DOM</strong> - Standard selectors can't pierce shadow boundary</li>
+      <li><strong>Delayed Content</strong> - Need waitFor to handle async loading</li>
+    </ol>
+  </section>
+</body>
+</html>
