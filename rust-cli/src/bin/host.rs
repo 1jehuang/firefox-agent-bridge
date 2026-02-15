@@ -504,6 +504,14 @@ async fn process_auto_login(
     let fill_ok = fill_result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
     let fill_error = fill_result.get("error").and_then(|v| v.as_str()).map(|s| s.to_string());
 
+    if fill_ok {
+        let summary = if submit { "Auto-Login" } else { "Auto-Fill" };
+        let body = format!("{} on {}", masked, search);
+        let _ = tokio::process::Command::new("notify-send")
+            .args(["-i", "dialog-password", "-a", "Firefox Agent Bridge", summary, &body])
+            .spawn();
+    }
+
     Ok(json!({
         "autoLogin": true,
         "filled": fill_ok,
