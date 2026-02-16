@@ -19,7 +19,7 @@ path = "src/bin/host.rs"
 
 [dependencies]
 # CLI parsing
-clap = { version = "4", features = ["derive", "cargo"] }
+clap = { version = "4", features = ["derive", "cargo", "env"] }
 
 # WebSocket client
 tokio-tungstenite = "0.24"

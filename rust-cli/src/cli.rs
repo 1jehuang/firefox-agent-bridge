@@ -22,6 +22,11 @@ pub struct Cli {
     /// Include timing breakdown in output (total, connect, roundtrip in ms)
     #[arg(short, long)]
     pub timing: bool,
+
+    /// Record actions to a directory (screenshots + event log)
+    /// Can also be set via BROWSER_RECORD_DIR env var
+    #[arg(long, value_name = "DIR", env = "BROWSER_RECORD_DIR")]
+    pub record: Option<String>,
 }
 
 #[derive(Subcommand)]

@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod protocol;
+mod recorder;
 
 use anyhow::Result;
 use base64::Engine;
@@ -172,10 +173,33 @@ async fn main() -> Result<()> {
         (action, params)
     };
 
+    // Initialize recorder if --record is set or recording marker file exists
+    let record_dir = cli.record.clone().or_else(|| {
+        let marker = dirs::home_dir()?.join(".recording_dir");
+        std::fs::read_to_string(marker).ok().map(|s| s.trim().to_string())
+    });
+    let rec = if let Some(ref dir) = record_dir {
+        let path = std::path::Path::new(dir);
+        if path.is_dir() {
+            Some(recorder::Recorder::new(path).await?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Send to Firefox via WebSocket (with timing)
-    let timed_response = client::send_command_timed(&action, params).await?;
+    let timed_response = client::send_command_timed(&action, params.clone()).await?;
     let response = timed_response.response;
     let timing = timed_response.timing;
+
+    // Record the action if recording
+    if let Some(ref rec) = rec {
+        if let Err(e) = rec.record_action(&action, &params, &response, timing.total_ms).await {
+            eprintln!("Recording error: {}", e);
+        }
+    }
 
     // Handle response
     match response {
