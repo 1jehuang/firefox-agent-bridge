@@ -254,6 +254,7 @@ struct VaultCredential {
 
 type SharedVault = Arc<RwLock<Option<Vault>>>;
 
+#[deprecated(note = "Use config files instead of gnome-keyring/secret-tool")]
 fn read_secret_tool(service: &str, account: &str) -> Option<String> {
     let output = std::process::Command::new("secret-tool")
         .args(["lookup", "service", service, "account", account])
@@ -266,11 +267,31 @@ fn read_secret_tool(service: &str, account: &str) -> Option<String> {
     if value.is_empty() { None } else { Some(value) }
 }
 
+fn read_api_credential(name: &str) -> Option<String> {
+    if let Ok(val) = env::var(&format!("BW_{}", name.to_uppercase())) {
+        let val = val.trim().to_string();
+        if !val.is_empty() { return Some(val); }
+    }
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("~/.config"))
+        .join("bronzewarden");
+    if let Ok(val) = std::fs::read_to_string(config_dir.join(name)) {
+        let val = val.trim().to_string();
+        if !val.is_empty() { return Some(val); }
+    }
+    #[allow(deprecated)]
+    if let Some(val) = read_secret_tool("bronzewarden", name) {
+        log!("WARNING: Reading {} from gnome-keyring (deprecated). Use ~/.config/bronzewarden/{} file instead.", name, name);
+        return Some(val);
+    }
+    None
+}
+
 async fn sync_vault_with_api_key() -> Result<(), String> {
-    let client_id = read_secret_tool("bronzewarden", "client_id")
-        .ok_or("No API client_id in keyring")?;
-    let client_secret = read_secret_tool("bronzewarden", "client_secret")
-        .ok_or("No API client_secret in keyring")?;
+    let client_id = read_api_credential("client_id")
+        .ok_or("No API client_id found. Create ~/.config/bronzewarden/client_id or set BW_CLIENT_ID")?;
+    let client_secret = read_api_credential("client_secret")
+        .ok_or("No API client_secret found. Create ~/.config/bronzewarden/client_secret or set BW_CLIENT_SECRET")?;
 
     let mut config = BwConfig::load().map_err(|e| format!("Config load: {}", e))?;
     let api = BitwardenApi::new(&config.identity_url, &config.api_url, &config.device_id);
@@ -356,6 +377,7 @@ fn read_password_from_file() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+#[deprecated(note = "Use BW_PASSWORD_FILE instead of secret-tool/keyring")]
 fn read_password_from_secret_tool() -> Option<String> {
     read_secret_tool("firefox-agent-bridge", "bronzewarden")
 }
@@ -367,11 +389,13 @@ fn resolve_bw_password() -> Result<String, String> {
     if let Some(pw) = read_password_from_file() {
         return Ok(pw);
     }
+    #[allow(deprecated)]
     if let Some(pw) = read_password_from_secret_tool() {
+        log!("WARNING: Reading vault password from gnome-keyring (deprecated). Use BW_PASSWORD_FILE or setup-fingerprint instead.");
         return Ok(pw);
     }
     Err(
-        "No vault password source available. Set BW_PASSWORD, set BW_PASSWORD_FILE, or store password via secret-tool."
+        "No vault password source available. Set BW_PASSWORD_FILE or run `bronzewarden setup-fingerprint`."
             .to_string(),
     )
 }
@@ -382,17 +406,24 @@ fn unlock_vault_from_sources() -> Result<Vault, String> {
         .ok_or("Not logged in to bronzewarden. Run `bronzewarden login` first.")?;
     let encrypted_key = config.encrypted_user_key.as_ref()
         .ok_or("No user key stored. Run `bronzewarden login` first.")?;
-    let kdf_params = config.kdf_params()
-        .ok_or("No KDF params stored.")?;
 
-    let password = resolve_bw_password()?;
-
-    let master_key = MasterKey::derive(&password, email, &kdf_params)
-        .map_err(|e| format!("Key derivation failed: {}", e))?;
-    let stretched = master_key.stretch()
-        .map_err(|e| format!("Key stretch failed: {}", e))?;
-    let user_key = EncString(encrypted_key.clone()).decrypt_to_key(&stretched)
-        .map_err(|e| format!("Failed to decrypt user key: {}", e))?;
+    // Try protected key (fingerprint unlock) first
+    let user_key = if bronzewarden::protected_key::has_protected_key() {
+        log!("Using protected key (fingerprint unlock)");
+        bronzewarden::protected_key::load_protected_key()
+            .map_err(|e| format!("Failed to load protected key: {}", e))?
+    } else {
+        // Fall back to password-based unlock
+        let kdf_params = config.kdf_params()
+            .ok_or("No KDF params stored.")?;
+        let password = resolve_bw_password()?;
+        let master_key = MasterKey::derive(&password, email, &kdf_params)
+            .map_err(|e| format!("Key derivation failed: {}", e))?;
+        let stretched = master_key.stretch()
+            .map_err(|e| format!("Key stretch failed: {}", e))?;
+        EncString(encrypted_key.clone()).decrypt_to_key(&stretched)
+            .map_err(|e| format!("Failed to decrypt user key: {}", e))?
+    };
 
     let cache = BwConfig::load_vault_cache()
         .map_err(|e| format!("Failed to load vault cache: {}. Run `bronzewarden sync` first.", e))?;
