@@ -65,8 +65,21 @@ fn fingerprint_timeout_ms() -> u64 {
         .unwrap_or(20000)
 }
 
-async fn verify_fingerprint() -> Result<(), String> {
+async fn verify_fingerprint(reason: &str, detail: &str) -> Result<(), String> {
     let user = env::var("USER").map_err(|_| "USER env var is not set for fingerprint verification.")?;
+
+    let body = if detail.is_empty() {
+        format!("{}\nTouch the fingerprint sensor to continue.", reason)
+    } else {
+        format!("{}\n{}\nTouch the fingerprint sensor to continue.", reason, detail)
+    };
+
+    let _ = Command::new("notify-send")
+        .args(["-i", "fingerprint", "-a", "Firefox Agent Bridge",
+               "-u", "normal", "-t", "20000",
+               "🔐 Fingerprint Required", &body])
+        .spawn();
+
     let mut cmd = Command::new("fprintd-verify");
     cmd.arg(&user)
         .stdout(Stdio::piped())
@@ -75,7 +88,14 @@ async fn verify_fingerprint() -> Result<(), String> {
 
     let output = timeout(Duration::from_millis(fingerprint_timeout_ms()), cmd.output())
         .await
-        .map_err(|_| "Fingerprint verification timed out. Touch the enrolled fingerprint sensor and try again.")?
+        .map_err(|_| {
+            let _ = Command::new("notify-send")
+                .args(["-i", "dialog-error", "-a", "Firefox Agent Bridge",
+                       "-u", "normal", "-t", "5000",
+                       "❌ Fingerprint Timed Out", "Auto-fill was cancelled."])
+                .spawn();
+            "Fingerprint verification timed out. Touch the enrolled fingerprint sensor and try again.".to_string()
+        })?
         .map_err(|e: std::io::Error| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 "fprintd-verify not found. Install fprintd to use fingerprint auth.".to_string()
@@ -85,15 +105,27 @@ async fn verify_fingerprint() -> Result<(), String> {
         })?;
 
     if output.status.success() {
+        let _ = Command::new("notify-send")
+            .args(["-i", "dialog-ok", "-a", "Firefox Agent Bridge",
+                   "-u", "low", "-t", "3000",
+                   "✅ Fingerprint Verified", reason])
+            .spawn();
         return Ok(());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let detail = stderr.trim().split('\n').rev().find(|l| !l.trim().is_empty())
+    let fail_detail = stderr.trim().split('\n').rev().find(|l| !l.trim().is_empty())
         .or_else(|| stdout.trim().split('\n').rev().find(|l| !l.trim().is_empty()))
         .unwrap_or("verification failed");
-    Err(format!("Fingerprint verification failed: {}", detail))
+
+    let _ = Command::new("notify-send")
+        .args(["-i", "dialog-error", "-a", "Firefox Agent Bridge",
+               "-u", "normal", "-t", "5000",
+               "❌ Fingerprint Failed", &format!("Auto-fill denied: {}", fail_detail)])
+        .spawn();
+
+    Err(format!("Fingerprint verification failed: {}", fail_detail))
 }
 
 /// Log to stderr (native messaging uses stdout for messages)
@@ -484,10 +516,7 @@ async fn process_auto_login(
 
     ensure_vault_unlocked(vault).await?;
 
-    if autologin_require_fingerprint() {
-        verify_fingerprint().await?;
-    }
-
+    // Look up credential first so we can show context in fingerprint prompt
     let vault_guard = vault.read().await;
     let v = vault_guard.as_ref()
         .ok_or("Vault is not unlocked.")?;
@@ -495,6 +524,18 @@ async fn process_auto_login(
     drop(vault_guard);
 
     let masked = mask_username(&cred.username);
+
+    if autologin_require_fingerprint() {
+        let reason = format!("Auto-fill {} on {}", masked, search);
+        let detail = if let Some(caller) = message.get("params")
+            .and_then(|p| p.get("reason"))
+            .and_then(|v| v.as_str()) {
+            format!("Requested by: {}", caller)
+        } else {
+            String::new()
+        };
+        verify_fingerprint(&reason, &detail).await?;
+    }
 
     let fill_id = next_id();
     let fill_msg = json!({
