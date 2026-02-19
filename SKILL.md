@@ -31,6 +31,12 @@ browser getContent '{"format": "annotated"}'
 
 ```bash
 browser <action> '<json_params>'
+
+# With timing info
+browser --timing <action> '<json_params>'
+
+# With screen recording
+browser --record /path/to/dir <action> '<json_params>'
 ```
 
 ## Actions Reference
@@ -40,7 +46,7 @@ browser <action> '<json_params>'
 | Action | Description | Key Params |
 |--------|-------------|------------|
 | `listTabs` | List all open tabs across windows | - |
-| `newSession` | Create new tab to work in | `url` (optional) |
+| `newSession` | Create new tab to work in | `url` (optional), `sandbox` (private window) |
 | `setActiveTab` | Switch which tab agent works on | `tabId`, `focus` |
 | `getActiveTab` | Get current tab info | - |
 
@@ -52,17 +58,74 @@ browser <action> '<json_params>'
 | `getContent` | Get page content | `format`: `annotated`, `text`, `html` |
 | `getInteractables` | List clickable elements and inputs | `selector` (optional scope) |
 | `screenshot` | Capture visible area as PNG | `filename` (optional) |
+| `reload` | Reload current tab | - |
 
 ### Interaction
 
 | Action | Description | Key Params |
 |--------|-------------|------------|
 | `click` | Click element | `selector`, `text`, or `x`/`y` coords |
-| `type` | Type into input | `selector`, `text`, `submit`, `clear` |
-| `fillForm` | Fill multiple fields | `fields[]` with selector/value pairs |
+| `type` | Type into focused/selected input | `selector`, `text`, `submit`, `clear` |
+| `fillForm` | Fill form fields (inputs, textareas, selects) | `fields[]` array with selector/value |
+| `scroll` | Scroll the page or an element | `y`/`x`, `selector`, `position` |
 | `waitFor` | Wait for element/text | `selector`, `text`, `timeout` |
-| `scroll` | Scroll the page | `y`/`x`, `selector`, `position` |
-| `evaluate` | Execute JavaScript and return result | `script` |
+
+### Rich Text Editors & File Operations
+
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `uploadFile` | Upload file to `<input type="file">` | `selector`, `path` (local file path) |
+| `dropFile` | Drag-and-drop file onto element | `selector`, `path` (local file path) |
+| `evaluate` | Run JavaScript in page context | `script`, `pageWorld` (bool) |
+
+#### uploadFile - Upload Files to Input Elements
+
+```bash
+browser uploadFile '{"selector": "#fileInput", "path": "/home/user/doc.pdf"}'
+```
+
+The CLI reads the file, base64-encodes it, and sends it via `fillForm` internally. Works with any `<input type="file">` including hidden ones.
+
+#### dropFile - Drag-and-Drop Files
+
+```bash
+browser dropFile '{"selector": "#dropZone", "path": "/home/user/image.png"}'
+```
+
+Simulates a native file drop. Creates a DataTransfer with the file and dispatches dragenter → dragover → drop events in the page world. Works with drop zones, contenteditable editors, and any element with drop handlers.
+
+#### evaluate - Run JavaScript on the Page
+
+```bash
+# Simple evaluation
+browser evaluate '{"script": "return document.title"}'
+
+# In page world (needed for accessing page JS objects)
+browser evaluate '{"script": "return window.someAppState", "pageWorld": true}'
+```
+
+Use `pageWorld: true` when you need to interact with the page's own JavaScript context (React state, app globals, etc). Default runs in content script context.
+
+#### fillForm - The Right Way to Fill Forms
+
+**IMPORTANT:** There is no `fill` command. Use `fillForm` with a `fields` array:
+
+```bash
+# Fill a single field
+browser fillForm '{"fields": [{"selector": "#email", "value": "test@example.com"}]}'
+
+# Fill multiple fields at once (text inputs, textareas, AND select dropdowns)
+browser fillForm '{"fields": [
+  {"selector": "#name", "value": "John Doe"},
+  {"selector": "#email", "value": "john@example.com"},
+  {"selector": "#subject", "value": "support"},
+  {"selector": "#message", "value": "Hello world"}
+]}'
+```
+
+Works with: `<input>`, `<textarea>`, `<select>`, checkboxes, radio buttons, contenteditable elements, rich text editors (Draft.js, Lexical, TinyMCE, ProseMirror).
+
+For rich text editors, fillForm automatically detects the editor type and uses the appropriate insertion method (execCommand, InputEvent, or direct DOM manipulation in page world).
 
 ### Control Flow
 
@@ -73,6 +136,7 @@ browser <action> '<json_params>'
 | `listForks` | List active forks | - |
 | `tryUntil` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
 | `parallel` | Run commands on multiple URLs | `branches[]` with url + commands |
+| `batch` | Run multiple commands in sequence | `commands[]` |
 
 ### Authentication & Vault
 
@@ -116,6 +180,9 @@ Returns:
 ```bash
 # Start fresh
 browser newSession '{"url": "https://amazon.com"}'
+
+# Start in sandbox (private window, no cookies)
+browser newSession '{"url": "https://example.com", "sandbox": true}'
 
 # Or switch to existing tab
 browser setActiveTab '{"tabId": 456}'
@@ -376,6 +443,10 @@ This lets multiple agents work in parallel without stepping on each other.
 4. **Use `annotated` format** - shows content + clickable elements together
 5. **Use selectors from annotated output** - more reliable than text matching
 6. **Fork when uncertain** - try multiple paths, kill the wrong ones
+7. **Never use `sleep` commands** - browser commands are synchronous and wait for completion. Use `waitFor` action if you need to wait for specific elements or text to appear
+8. **Use `uploadFile` for file inputs** - reads local files and uploads automatically
+9. **Use `dropFile` for drop zones** - simulates native drag-and-drop
+10. **Use `evaluate` for custom JS** - with `pageWorld: true` for page-context access
 
 ## Troubleshooting
 
@@ -383,3 +454,5 @@ This lets multiple agents work in parallel without stepping on each other.
 2. **Check connection**: `browser ping`
 3. **Connection refused?** The extension may need to be reloaded in `about:debugging`
 4. **Element not found?** Use `browser getContent '{"format": "annotated"}'` to see what's on the page
+5. **Rich text editor not filling?** `fillForm` handles Draft.js, Lexical, TinyMCE, ProseMirror automatically
+6. **File drop not working?** `dropFile` runs in page world to bypass Firefox security restrictions
