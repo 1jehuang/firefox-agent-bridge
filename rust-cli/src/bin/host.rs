@@ -26,7 +26,8 @@ use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
 /// Environment variable configuration
@@ -183,6 +184,9 @@ fn get_mime_type(path: &Path) -> &'static str {
 }
 
 /// Process uploadFile action - read file and convert to fillForm with base64 data
+/// Max base64 data size per native messaging message (~750KB to stay under Firefox's 1MB limit)
+const CHUNK_SIZE: usize = 750_000;
+
 fn process_upload_file(message: &mut Value) -> Result<(), String> {
     let params = message.get_mut("params").ok_or("Missing params")?;
     let file_path = params.get("filePath")
@@ -216,6 +220,98 @@ fn process_upload_file(message: &mut Value) -> Result<(), String> {
             }
         }]
     });
+
+    Ok(())
+}
+
+/// Check if a message payload is too large for native messaging and needs chunking
+fn needs_chunking(message: &Value) -> bool {
+    let serialized = message.to_string();
+    serialized.len() > CHUNK_SIZE
+}
+
+/// Send a large message in chunks via native messaging, then send the action with a reassembly reference
+async fn send_chunked_file(
+    message: &mut Value,
+    native_tx: &NativeTx,
+) -> Result<(), String> {
+    let id = message.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+    let action = message.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    // Extract file data from the message (works for fillForm and dropFile)
+    let (base64_data, file_name, mime_type, selector) = if action == "fillForm" {
+        let fields = message.get("params")
+            .and_then(|p| p.get("fields"))
+            .and_then(|f| f.as_array())
+            .ok_or("Missing fields")?;
+        let field = fields.first().ok_or("Empty fields")?;
+        let file = field.get("file").ok_or("No file in field")?;
+        let data = file.get("data").and_then(|v| v.as_str()).ok_or("No data")?.to_string();
+        let name = file.get("name").and_then(|v| v.as_str()).unwrap_or("file").to_string();
+        let mime = file.get("type").and_then(|v| v.as_str()).unwrap_or("application/octet-stream").to_string();
+        let sel = field.get("selector").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        (data, name, mime, sel)
+    } else if action == "dropFile" {
+        let params = message.get("params").ok_or("Missing params")?;
+        let data = params.get("data").and_then(|v| v.as_str()).ok_or("No data")?.to_string();
+        let name = params.get("fileName").and_then(|v| v.as_str()).unwrap_or("file").to_string();
+        let mime = params.get("mimeType").and_then(|v| v.as_str()).unwrap_or("application/octet-stream").to_string();
+        let sel = params.get("selector").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        (data, name, mime, sel)
+    } else {
+        return Err("Unsupported chunked action".to_string());
+    };
+
+    let transfer_id = format!("chunk_{}", id);
+    let total_chunks = (base64_data.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
+
+    log!("Chunking file {} ({} bytes base64) into {} chunks", file_name, base64_data.len(), total_chunks);
+
+    // Send chunk_start
+    let start_msg = json!({
+        "type": "chunk_start",
+        "transferId": transfer_id,
+        "fileName": file_name,
+        "mimeType": mime_type,
+        "totalSize": base64_data.len(),
+        "totalChunks": total_chunks
+    });
+    native_tx.send(start_msg).await.map_err(|e| format!("Failed to send chunk_start: {}", e))?;
+
+    // Send chunks
+    for i in 0..total_chunks {
+        let start = i * CHUNK_SIZE;
+        let end = std::cmp::min(start + CHUNK_SIZE, base64_data.len());
+        let chunk_data = &base64_data[start..end];
+
+        let chunk_msg = json!({
+            "type": "chunk_data",
+            "transferId": transfer_id,
+            "chunkIndex": i,
+            "data": chunk_data
+        });
+        native_tx.send(chunk_msg).await.map_err(|e| format!("Failed to send chunk {}: {}", i, e))?;
+    }
+
+    // Send the actual action with a reference to the chunked transfer
+    if action == "fillForm" {
+        message["params"] = json!({
+            "fields": [{
+                "selector": selector,
+                "file": {
+                    "name": file_name,
+                    "type": mime_type,
+                    "chunkedTransfer": transfer_id
+                }
+            }]
+        });
+    } else if action == "dropFile" {
+        let params = message.get_mut("params").ok_or("Missing params")?;
+        if let Some(obj) = params.as_object_mut() {
+            obj.remove("data");
+            obj.insert("chunkedTransfer".to_string(), json!(transfer_id));
+        }
+    }
 
     Ok(())
 }
@@ -601,7 +697,12 @@ async fn handle_ws_client(
     pending: PendingMap,
     vault: SharedVault,
 ) {
-    let ws_stream = match accept_async(stream).await {
+    let ws_config = WebSocketConfig {
+        max_message_size: Some(128 * 1024 * 1024),
+        max_frame_size: Some(64 * 1024 * 1024),
+        ..Default::default()
+    };
+    let ws_stream = match accept_async_with_config(stream, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
             log!("WebSocket handshake error: {}", e);
@@ -783,7 +884,16 @@ async fn handle_ws_client(
             });
         }
 
-        // Send to native messaging
+        // Send to native messaging (with chunking for large payloads)
+        if needs_chunking(&message) {
+            if let Err(e) = send_chunked_file(&mut message, &native_tx).await {
+                log!("Failed to chunk file: {}", e);
+                pending.write().await.remove(&id);
+                let error_msg = json!({"id": id, "ok": false, "error": format!("Failed to chunk file: {}", e)});
+                let _ = write.send(Message::Text(error_msg.to_string())).await;
+                continue;
+            }
+        }
         if let Err(e) = native_tx.send(message).await {
             log!("Failed to send to native: {}", e);
             pending.write().await.remove(&id);

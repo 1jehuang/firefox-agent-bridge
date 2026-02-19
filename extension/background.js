@@ -205,8 +205,58 @@ function connectNative() {
   }
 }
 
+// Chunked file transfer reassembly
+const pendingChunks = new Map(); // transferId -> { fileName, mimeType, totalChunks, chunks: [] }
+
+function reassembleChunkedData(message) {
+  if (!message.params) return;
+  const action = message.action;
+
+  if (action === "fillForm" && Array.isArray(message.params.fields)) {
+    for (const field of message.params.fields) {
+      if (field.file && field.file.chunkedTransfer) {
+        const transferId = field.file.chunkedTransfer;
+        const transfer = pendingChunks.get(transferId);
+        if (transfer) {
+          field.file.data = transfer.chunks.join("");
+          delete field.file.chunkedTransfer;
+          pendingChunks.delete(transferId);
+        }
+      }
+    }
+  } else if (action === "dropFile" && message.params.chunkedTransfer) {
+    const transferId = message.params.chunkedTransfer;
+    const transfer = pendingChunks.get(transferId);
+    if (transfer) {
+      message.params.data = transfer.chunks.join("");
+      delete message.params.chunkedTransfer;
+      pendingChunks.delete(transferId);
+    }
+  }
+}
+
 async function handleNativeMessage(message) {
   if (!message) return;
+
+  // Handle chunked file transfer messages
+  if (message.type === "chunk_start") {
+    pendingChunks.set(message.transferId, {
+      fileName: message.fileName,
+      mimeType: message.mimeType,
+      totalSize: message.totalSize,
+      totalChunks: message.totalChunks,
+      chunks: new Array(message.totalChunks)
+    });
+    return;
+  }
+  if (message.type === "chunk_data") {
+    const transfer = pendingChunks.get(message.transferId);
+    if (transfer) {
+      transfer.chunks[message.chunkIndex] = message.data;
+    }
+    return;
+  }
+
   if (message.type && !message.action) return;
 
   const id = message.id;
@@ -229,6 +279,8 @@ async function handleNativeMessage(message) {
   }
 
   try {
+    // Reassemble chunked file data before dispatching
+    reassembleChunkedData(message);
     const result = await dispatchAction(action, message.params || {}, profile);
     if (profile) {
       const timing = { extensionMs: roundMs(performance.now() - started) };
