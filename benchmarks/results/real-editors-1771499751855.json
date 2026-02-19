@@ -1,0 +1,57 @@
+{
+  "timestamp": "2026-02-19T11:15:51.855Z",
+  "mode": "dry-run",
+  "passed": 9,
+  "failed": 0,
+  "totalTime": 38225,
+  "results": [
+    {
+      "name": "x-compose-type",
+      "pass": true,
+      "elapsed": 3280,
+      "richEditor": true
+    },
+    {
+      "name": "x-compose-clear-retype",
+      "pass": true,
+      "elapsed": 4017
+    },
+    {
+      "name": "x-compose-multiline",
+      "pass": true,
+      "elapsed": 3653,
+      "richEditor": true
+    },
+    {
+      "name": "reddit-post-body",
+      "pass": true,
+      "elapsed": 3180,
+      "richEditor": true
+    },
+    {
+      "name": "reddit-title-shadow",
+      "pass": true,
+      "elapsed": 2667
+    },
+    {
+      "name": "reddit-full-form",
+      "pass": true,
+      "elapsed": 3614
+    },
+    {
+      "name": "canvas-text-submission-api",
+      "pass": true,
+      "elapsed": 39
+    },
+    {
+      "name": "canvas-discussion-browser",
+      "pass": true,
+      "elapsed": 4441
+    },
+    {
+      "name": "canvas-discussion-reply",
+      "pass": true,
+      "elapsed": 13334
+    }
+  ]
+}
