@@ -1,0 +1,133 @@
+{
+  "timestamp": "2026-02-19T12:30:56.576Z",
+  "server": "http://localhost:3456",
+  "passed": 21,
+  "failed": 3,
+  "totalTime": 32112,
+  "results": [
+    {
+      "name": "draftjs-type-compose",
+      "pass": true,
+      "elapsed": 1322,
+      "richEditor": true
+    },
+    {
+      "name": "draftjs-clear-retype",
+      "pass": true,
+      "elapsed": 1407
+    },
+    {
+      "name": "draftjs-reply-box",
+      "pass": true,
+      "elapsed": 1251,
+      "richEditor": true
+    },
+    {
+      "name": "draftjs-quote-replace",
+      "pass": true,
+      "elapsed": 1212
+    },
+    {
+      "name": "draftjs-button-state",
+      "pass": true,
+      "elapsed": 1372
+    },
+    {
+      "name": "lexical-post-body",
+      "pass": false,
+      "elapsed": 1254,
+      "richEditor": true
+    },
+    {
+      "name": "lexical-shadow-dom-title",
+      "pass": true,
+      "elapsed": 1059
+    },
+    {
+      "name": "lexical-comment-reply",
+      "pass": false,
+      "elapsed": 1226,
+      "richEditor": true
+    },
+    {
+      "name": "lexical-edit-existing",
+      "pass": false,
+      "elapsed": 1262
+    },
+    {
+      "name": "lexical-full-form",
+      "pass": true,
+      "elapsed": 1437
+    },
+    {
+      "name": "canvas-tinymce-type",
+      "pass": true,
+      "elapsed": 1553
+    },
+    {
+      "name": "canvas-tinymce-multiline",
+      "pass": true,
+      "elapsed": 1575
+    },
+    {
+      "name": "canvas-file-upload-input",
+      "pass": true,
+      "elapsed": 1390
+    },
+    {
+      "name": "canvas-image-upload",
+      "pass": true,
+      "elapsed": 1450
+    },
+    {
+      "name": "canvas-drop-file",
+      "pass": true,
+      "elapsed": 1352
+    },
+    {
+      "name": "canvas-submit-state",
+      "pass": true,
+      "elapsed": 1901
+    },
+    {
+      "name": "upload-single-file",
+      "pass": true,
+      "elapsed": 1247
+    },
+    {
+      "name": "upload-image",
+      "pass": true,
+      "elapsed": 1204
+    },
+    {
+      "name": "upload-video",
+      "pass": true,
+      "elapsed": 1247
+    },
+    {
+      "name": "upload-multi-file",
+      "pass": true,
+      "elapsed": 1230
+    },
+    {
+      "name": "upload-drop-zone",
+      "pass": true,
+      "elapsed": 1326
+    },
+    {
+      "name": "upload-drop-on-editor",
+      "pass": true,
+      "elapsed": 1356
+    },
+    {
+      "name": "upload-pdf",
+      "pass": true,
+      "elapsed": 1245
+    },
+    {
+      "name": "upload-hidden-input",
+      "pass": true,
+      "elapsed": 1234
+    }
+  ]
+}

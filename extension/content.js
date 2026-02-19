@@ -61,49 +61,64 @@ function contentEditableInsertText(el, text, clear) {
     if (!pageWin) return { ok: false, error: 'no wrappedJSObject' };
     el.focus();
     const sel = window.getSelection();
-    if (clear) {
+
+    function clearViaExecCommand() {
       sel.selectAllChildren(el);
       pageWin.document.execCommand('delete', false, null);
-    } else {
-      sel.collapseToEnd();
     }
+
     const hasNewlines = text.includes('\n');
+    const lines = hasNewlines ? text.split('\n') : null;
+
+    // Strategy 1: beforeinput events via cloneInto (page-world events that Lexical etc. can read)
+    // Must check defaultPrevented to know if a framework actually handled the event
+    try {
+      if (clear) {
+        sel.selectAllChildren(el);
+        const delOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'deleteContentBackward' }, pageWin);
+        const delEv = new pageWin.InputEvent('beforeinput', delOpts);
+        el.dispatchEvent(delEv);
+      }
+      let anyPrevented = false;
+      if (!hasNewlines) {
+        const textOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertText', data: text }, pageWin);
+        const ev = new pageWin.InputEvent('beforeinput', textOpts);
+        el.dispatchEvent(ev);
+        anyPrevented = ev.defaultPrevented;
+      } else {
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0) {
+            const paraOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertParagraph' }, pageWin);
+            const pEv = new pageWin.InputEvent('beforeinput', paraOpts);
+            el.dispatchEvent(pEv);
+            if (pEv.defaultPrevented) anyPrevented = true;
+          }
+          if (lines[i].length > 0) {
+            const textOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertText', data: lines[i] }, pageWin);
+            const tEv = new pageWin.InputEvent('beforeinput', textOpts);
+            el.dispatchEvent(tEv);
+            if (tEv.defaultPrevented) anyPrevented = true;
+          }
+        }
+      }
+      if (anyPrevented) {
+        const paraCount = el.querySelectorAll('p').length;
+        return { ok: true, text: el.textContent, paragraphs: paraCount > 0 ? paraCount : undefined };
+      }
+    } catch (e) { /* cloneInto/beforeinput not available */ }
+
+    // Strategy 2: execCommand (works for Draft.js, TinyMCE, ProseMirror, simple contenteditable)
+    if (clear) clearViaExecCommand();
+    else sel.collapseToEnd();
+
     if (!hasNewlines) {
       const ok = pageWin.document.execCommand('insertText', false, text);
       if (!ok) return { ok: false, error: 'execCommand returned false' };
       return { ok: true, text: el.textContent };
     }
-    // Multiline: try beforeinput events in page world (needed for Lexical)
-    // Use cloneInto to create events visible to page-world listeners (bypasses CSP unlike eval)
-    const lines = text.split('\n');
-    let usedBeforeInput = false;
-    try {
-      for (let i = 0; i < lines.length; i++) {
-        if (i > 0) {
-          const paraOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertParagraph' }, pageWin);
-          const paraEvent = new pageWin.InputEvent('beforeinput', paraOpts);
-          el.dispatchEvent(paraEvent);
-        }
-        if (lines[i].length > 0) {
-          const textOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertText', data: lines[i] }, pageWin);
-          const textEvent = new pageWin.InputEvent('beforeinput', textOpts);
-          el.dispatchEvent(textEvent);
-        }
-      }
-      const paraCount = el.querySelectorAll('p').length;
-      if (paraCount > 1) {
-        usedBeforeInput = true;
-        return { ok: true, text: el.textContent, paragraphs: paraCount };
-      }
-    } catch (e) { /* cloneInto/beforeinput failed */ }
-    // Fallback: execCommand insertParagraph (works for Draft.js, TinyMCE, ProseMirror)
-    if (!usedBeforeInput) {
-      sel.selectAllChildren(el);
-      pageWin.document.execCommand('delete', false, null);
-      for (let i = 0; i < lines.length; i++) {
-        if (i > 0) pageWin.document.execCommand('insertParagraph', false, null);
-        if (lines[i].length > 0) pageWin.document.execCommand('insertText', false, lines[i]);
-      }
+    for (let i = 0; i < lines.length; i++) {
+      if (i > 0) pageWin.document.execCommand('insertParagraph', false, null);
+      if (lines[i].length > 0) pageWin.document.execCommand('insertText', false, lines[i]);
     }
     return { ok: true, text: el.textContent };
   } catch (e) {
