@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProseMirror Editor - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .editor-container { margin: 20px 0; }
+    .editor-label { font-weight: bold; margin-bottom: 8px; display: block; }
+
+    .ProseMirror {
+      position: relative; word-wrap: break-word; white-space: pre-wrap;
+      font-variant-ligatures: none; font-feature-settings: "liga" 0;
+    }
+    .ProseMirror pre { white-space: pre-wrap; }
+    .ProseMirror li { position: relative; }
+
+    .ProseMirror {
+      min-height: 120px; padding: 12px; border: 2px solid #ccc;
+      border-radius: 6px; outline: none; line-height: 1.5;
+    }
+    .ProseMirror:focus { border-color: #4a9eff; box-shadow: 0 0 0 3px rgba(74,158,255,.2); }
+    .ProseMirror p { margin: 0 0 8px; }
+    .ProseMirror h1,.ProseMirror h2,.ProseMirror h3 { margin: 16px 0 8px; }
+    .ProseMirror blockquote { border-left: 3px solid #ddd; padding-left: 12px; margin-left: 0; color: #666; }
+    .ProseMirror code { background: #f0f0f0; padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+    .ProseMirror ul,.ProseMirror ol { padding-left: 24px; }
+
+    .toolbar {
+      display: flex; gap: 4px; padding: 8px; background: #f5f5f5;
+      border: 2px solid #ccc; border-bottom: none; border-radius: 6px 6px 0 0; flex-wrap: wrap;
+    }
+    .toolbar + .ProseMirror { border-top-left-radius: 0; border-top-right-radius: 0; }
+    .toolbar button {
+      padding: 4px 10px; background: white; border: 1px solid #ccc;
+      border-radius: 4px; cursor: pointer; font-size: 14px; min-width: 32px;
+    }
+    .toolbar button:hover { background: #e8e8e8; }
+    .toolbar .separator { width: 1px; background: #ccc; margin: 0 4px; }
+
+    .test-section { margin: 30px 0; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
+    .test-section h2 { margin-top: 0; }
+
+    .state-display {
+      margin-top: 10px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd;
+      border-radius: 4px; font-family: monospace; font-size: 12px;
+      max-height: 200px; overflow: auto; white-space: pre-wrap;
+    }
+    .state-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+
+    .result { padding: 10px; margin-top: 10px; border-radius: 4px; display: none; }
+    .result.pass { background: #d4edda; color: #155724; display: block; }
+    .result.fail { background: #f8d7da; color: #721c24; display: block; }
+    a { color: #007bff; }
+
+    .tiptap-wrapper { border: 2px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
+    .tiptap-wrapper .ProseMirror { border: none; border-radius: 0; min-height: 100px; }
+    .tiptap-wrapper .toolbar { border: none; border-bottom: 1px solid #e0e0e0; border-radius: 0; }
+  </style>
+</head>
+<body>
+  <h1>ProseMirror Editor Tests</h1>
+  <p>Tests for AI agent interaction with ProseMirror-based rich text editors.</p>
+
+  <div class="test-section" id="test-basic">
+    <h2>Test 1: Basic ProseMirror Editor</h2>
+    <p>A minimal ProseMirror editor. Agent should type plain text.</p>
+    <span class="editor-label">Simple Editor:</span>
+    <div id="editor-basic"></div>
+    <div class="state-label">Document State (JSON):</div>
+    <div class="state-display" id="state-basic">Loading...</div>
+  </div>
+
+  <div class="test-section" id="test-rich">
+    <h2>Test 2: Rich Editor with Formatting</h2>
+    <p>ProseMirror editor with bold, italic, headings, lists, blockquotes.</p>
+    <span class="editor-label">Rich Editor:</span>
+    <div class="toolbar" id="toolbar-rich">
+      <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+      <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+      <button type="button" data-cmd="code" title="Code"><code>&lt;/&gt;</code></button>
+      <div class="separator"></div>
+      <button type="button" data-cmd="h1" title="Heading 1">H1</button>
+      <button type="button" data-cmd="h2" title="Heading 2">H2</button>
+      <button type="button" data-cmd="h3" title="Heading 3">H3</button>
+      <div class="separator"></div>
+      <button type="button" data-cmd="bullet_list" title="Bullet List">• List</button>
+      <button type="button" data-cmd="ordered_list" title="Numbered List">1. List</button>
+      <button type="button" data-cmd="blockquote" title="Blockquote">&ldquo;</button>
+    </div>
+    <div id="editor-rich"></div>
+    <div class="state-label">Document State (JSON):</div>
+    <div class="state-display" id="state-rich">Loading...</div>
+  </div>
+
+  <div class="test-section" id="test-form">
+    <h2>Test 3: Form with Multiple Rich Text Fields</h2>
+    <p>Simulates a webapp with multiple ProseMirror editors in a form context.</p>
+    <form id="rich-form">
+      <div class="editor-container">
+        <label class="editor-label" for="field-title">Title:</label>
+        <input type="text" id="field-title" name="title" style="width:100%;padding:10px;margin-bottom:10px;border:2px solid #ccc;border-radius:6px;box-sizing:border-box;" placeholder="Enter title...">
+      </div>
+      <div class="editor-container">
+        <label class="editor-label">Body (Rich Text):</label>
+        <div class="tiptap-wrapper">
+          <div class="toolbar" id="toolbar-body">
+            <button type="button" data-cmd="bold"><b>B</b></button>
+            <button type="button" data-cmd="italic"><i>I</i></button>
+            <button type="button" data-cmd="h2">H2</button>
+            <button type="button" data-cmd="bullet_list">• List</button>
+          </div>
+          <div id="editor-body"></div>
+        </div>
+      </div>
+      <div class="editor-container">
+        <label class="editor-label">Summary (Plain Rich Text):</label>
+        <div id="editor-summary"></div>
+      </div>
+      <button type="submit" id="submit-btn" style="padding:12px 24px;background:#28a745;color:white;border:none;border-radius:4px;cursor:pointer;font-size:16px;margin-top:10px;">Submit Form</button>
+    </form>
+    <div class="result" id="form-result"></div>
+    <div class="state-label">Form Data (on submit):</div>
+    <div class="state-display" id="state-form">Submit the form to see data...</div>
+  </div>
+
+  <div class="test-section" id="test-replace">
+    <h2>Test 4: Replace Existing Content</h2>
+    <p>Editor starts with content. Agent must clear and type new content.</p>
+    <span class="editor-label">Editor with existing content:</span>
+    <div id="editor-replace"></div>
+    <div class="state-label">Document State (JSON):</div>
+    <div class="state-display" id="state-replace">Loading...</div>
+  </div>
+
+  <p style="margin-top: 30px;"><a href="/">Back to home</a></p>
+
+  <script type="module">
+    import {Schema, DOMParser as PmDOMParser} from 'https://cdn.jsdelivr.net/npm/prosemirror-model@1.24.1/+esm';
+    import {EditorState, TextSelection} from 'https://cdn.jsdelivr.net/npm/prosemirror-state@1.4.3/+esm';
+    import {EditorView} from 'https://cdn.jsdelivr.net/npm/prosemirror-view@1.38.1/+esm';
+    import {schema as basicSchema} from 'https://cdn.jsdelivr.net/npm/prosemirror-schema-basic@1.2.3/+esm';
+    import {addListNodes} from 'https://cdn.jsdelivr.net/npm/prosemirror-schema-list@1.5.1/+esm';
+    import {history, undo, redo} from 'https://cdn.jsdelivr.net/npm/prosemirror-history@1.4.1/+esm';
+    import {keymap} from 'https://cdn.jsdelivr.net/npm/prosemirror-keymap@1.2.3/+esm';
+    import {baseKeymap, toggleMark, setBlockType, wrapIn, lift} from 'https://cdn.jsdelivr.net/npm/prosemirror-commands@1.6.2/+esm';
+
+    window.__prosemirrorViews = {};
+
+    const myNodes = addListNodes(basicSchema.spec.nodes, "paragraph block*", "block");
+    const mySchema = new Schema({ nodes: myNodes, marks: basicSchema.spec.marks });
+
+    function updateStateDisplay(id, view) {
+      const el = document.getElementById(id);
+      if (el && view) el.textContent = JSON.stringify(view.state.doc.toJSON(), null, 2);
+    }
+
+    function createView(mountId, stateId, opts = {}) {
+      const viewOpts = {
+        state: EditorState.create({
+          schema: mySchema,
+          doc: opts.doc || undefined,
+          plugins: [
+            history(),
+            keymap({"Mod-z": undo, "Mod-y": redo}),
+            keymap(baseKeymap)
+          ]
+        }),
+        dispatchTransaction(tr) {
+          const newState = this.state.apply(tr);
+          this.updateState(newState);
+          if (stateId) updateStateDisplay(stateId, this);
+        }
+      };
+      const view = new EditorView(document.getElementById(mountId), viewOpts);
+      if (stateId) updateStateDisplay(stateId, view);
+      return view;
+    }
+
+    function setupToolbar(toolbarId, view) {
+      const toolbar = document.getElementById(toolbarId);
+      if (!toolbar) return;
+      toolbar.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        e.preventDefault();
+        const cmd = btn.dataset.cmd;
+        view.focus();
+        switch (cmd) {
+          case 'bold': toggleMark(mySchema.marks.strong)(view.state, view.dispatch); break;
+          case 'italic': toggleMark(mySchema.marks.em)(view.state, view.dispatch); break;
+          case 'code': toggleMark(mySchema.marks.code)(view.state, view.dispatch); break;
+          case 'h1': setBlockType(mySchema.nodes.heading, {level:1})(view.state, view.dispatch); break;
+          case 'h2': setBlockType(mySchema.nodes.heading, {level:2})(view.state, view.dispatch); break;
+          case 'h3': setBlockType(mySchema.nodes.heading, {level:3})(view.state, view.dispatch); break;
+          case 'bullet_list': wrapIn(mySchema.nodes.bullet_list)(view.state, view.dispatch); break;
+          case 'ordered_list': wrapIn(mySchema.nodes.ordered_list)(view.state, view.dispatch); break;
+          case 'blockquote': wrapIn(mySchema.nodes.blockquote)(view.state, view.dispatch); break;
+        }
+      });
+    }
+
+    // Test 1: Basic Editor
+    const basicView = createView('editor-basic', 'state-basic');
+    window.__prosemirrorViews.basic = basicView;
+
+    // Test 2: Rich Editor
+    const richView = createView('editor-rich', 'state-rich');
+    window.__prosemirrorViews.rich = richView;
+    setupToolbar('toolbar-rich', richView);
+
+    // Test 3: Form editors
+    const bodyView = createView('editor-body', null);
+    window.__prosemirrorViews.body = bodyView;
+    setupToolbar('toolbar-body', bodyView);
+
+    const summaryView = createView('editor-summary', null);
+    window.__prosemirrorViews.summary = summaryView;
+
+    document.getElementById('rich-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const data = {
+        title: document.getElementById('field-title').value,
+        body: bodyView.state.doc.textContent,
+        bodyJson: bodyView.state.doc.toJSON(),
+        summary: summaryView.state.doc.textContent,
+        summaryJson: summaryView.state.doc.toJSON()
+      };
+      document.getElementById('state-form').textContent = JSON.stringify(data, null, 2);
+      const result = document.getElementById('form-result');
+      result.className = 'result pass';
+      result.textContent = '✅ Form submitted! Title: "' + data.title + '", Body: ' + data.body.length + ' chars, Summary: ' + data.summary.length + ' chars';
+      result.style.display = 'block';
+      window.__formSubmitted = data;
+    });
+
+    // Test 4: Pre-populated editor
+    const existingContent = mySchema.node('doc', null, [
+      mySchema.node('paragraph', null, [mySchema.text('This is existing content that should be replaced.')]),
+      mySchema.node('paragraph', null, [mySchema.text('The agent needs to clear this and type new text.')]),
+      mySchema.node('paragraph', null, [mySchema.text('There are three paragraphs of old content here.')])
+    ]);
+    const replaceView = createView('editor-replace', 'state-replace', { doc: existingContent });
+    window.__prosemirrorViews.replace = replaceView;
+
+    // Expose schema and classes for agent use
+    window.__prosemirrorSchema = mySchema;
+    window.__prosemirrorClasses = { EditorState, TextSelection, Schema };
+
+    console.log('ProseMirror editors initialized. Views at window.__prosemirrorViews');
+  </script>
+</body>
+</html>

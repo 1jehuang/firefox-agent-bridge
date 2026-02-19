@@ -3,6 +3,161 @@ function roundMs(value) {
   return Math.round(value * 100) / 100;
 }
 
+function runInPageWorld(code) {
+  return new Promise((resolve) => {
+    try {
+      const pageWin = window.wrappedJSObject;
+      if (!pageWin) {
+        resolve({ ok: false, error: 'no wrappedJSObject' });
+        return;
+      }
+      const wrapped = '(function(){' + code + '})()';
+      const result = pageWin.eval(wrapped);
+      if (result && typeof result === 'object' && typeof result.then === 'function') {
+        const resultKey = '__fab_eval_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        pageWin.eval(
+          '(' + JSON.stringify(wrapped) + ').then ? void 0 : void 0;' +
+          'Promise.resolve(' + wrapped + ').then(function(r){' +
+          'window["' + resultKey + '"]=JSON.stringify({ok:true,value:r})' +
+          '}).catch(function(e){' +
+          'window["' + resultKey + '"]=JSON.stringify({ok:false,error:e.message})' +
+          '})'
+        );
+        let attempts = 0;
+        const poll = () => {
+          let raw;
+          try { raw = pageWin[resultKey]; } catch(e) { raw = undefined; }
+          if (raw && raw !== 'null') {
+            try { delete pageWin[resultKey]; } catch(e) {}
+            try { resolve(JSON.parse(raw)); } catch(e) { resolve({ok:true, value: raw}); }
+            return;
+          }
+          if (++attempts > 150) { resolve({ok:false, error:'timeout'}); return; }
+          setTimeout(poll, 20);
+        };
+        setTimeout(poll, 10);
+      } else {
+        const value = (result && typeof result === 'object') ? JSON.parse(JSON.stringify(result)) : result;
+        resolve({ ok: true, value: value });
+      }
+    } catch (e) {
+      resolve({ ok: false, error: e.message || String(e) });
+    }
+  });
+}
+
+function isProseMirrorElement(el) {
+  if (!el) return false;
+  if (el.classList && el.classList.contains('ProseMirror')) return true;
+  const pm = el.closest && el.closest('.ProseMirror');
+  return !!pm;
+}
+
+function getProseMirrorSelector(el) {
+  if (!el) return null;
+  const pm = el.classList.contains('ProseMirror') ? el : el.closest('.ProseMirror');
+  if (!pm) return null;
+  if (pm.id) return '#' + pm.id;
+  const parent = pm.parentElement;
+  if (parent && parent.id) return '#' + parent.id + ' .ProseMirror';
+  const path = [];
+  let node = pm;
+  while (node && node !== document.body && path.length < 4) {
+    let sel = node.tagName.toLowerCase();
+    if (node.id) { path.unshift('#' + node.id); break; }
+    if (node.className && typeof node.className === 'string') {
+      const cls = node.className.split(' ').filter(c => c && !c.includes(':'))[0];
+      if (cls) sel += '.' + cls;
+    }
+    path.unshift(sel);
+    node = node.parentElement;
+  }
+  return path.join(' > ');
+}
+
+async function proseMirrorInsertText(el, text, clear) {
+  try {
+    const pageWindow = window.wrappedJSObject;
+    if (!pageWindow) return { ok: false, error: 'no wrappedJSObject' };
+
+    const pmEl = el.classList.contains('ProseMirror') ? el : el.closest('.ProseMirror');
+    if (!pmEl) return { ok: false, error: 'not a PM element' };
+
+    let view = null;
+
+    // Strategy 1: Check global view registries
+    const registries = [
+      pageWindow.__prosemirrorViews,
+      pageWindow.__tiptapInstances,
+      pageWindow.__editorViews
+    ];
+    for (const views of registries) {
+      if (!views) continue;
+      const keys = Object.keys(views);
+      for (let i = 0; i < keys.length; i++) {
+        const v = views[keys[i]];
+        if (v && v.dom) {
+          // Compare using parent element ID or DOM identity
+          const vDom = v.dom;
+          const pmWrapped = pmEl.wrappedJSObject || pmEl;
+          if (vDom === pmWrapped || (pmEl.id && vDom.id === pmEl.id)) {
+            view = v;
+            break;
+          }
+          // Fallback: compare parent IDs
+          const vParent = vDom.parentElement;
+          const pmParent = pmEl.parentElement;
+          if (vParent && pmParent && vParent.id && vParent.id === pmParent.id) {
+            view = v;
+            break;
+          }
+        }
+      }
+      if (view) break;
+    }
+
+    // Strategy 2: Walk up DOM looking for pmViewDesc (ProseMirror internal)
+    if (!view) {
+      const wrapped = pmEl.wrappedJSObject || pmEl;
+      if (wrapped.pmViewDesc) {
+        const desc = wrapped.pmViewDesc;
+        view = desc.view || desc;
+      }
+    }
+
+    // Strategy 3: If only one view exists and we found PM element, use it
+    if (!view && pageWindow.__prosemirrorViews) {
+      const allViews = pageWindow.__prosemirrorViews;
+      const keys = Object.keys(allViews);
+      if (keys.length === 1) {
+        view = allViews[keys[0]];
+      }
+    }
+
+    if (!view || !view.state) return { ok: false, error: 'no PM view found' };
+
+    const tr = view.state.tr;
+    if (clear) {
+      tr.delete(0, tr.doc.content.size);
+    }
+    if (clear) {
+      tr.insertText(text, 0);
+    } else {
+      const end = tr.doc.content.size;
+      if (end > 2) {
+        tr.insertText(text, end - 1);
+      } else {
+        tr.insertText(text);
+      }
+    }
+    view.dispatch(tr);
+
+    return { ok: true, text: view.state.doc.textContent };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+}
+
 function textIncludes(haystack, needleLower) {
   return haystack && needleLower && haystack.toLowerCase().includes(needleLower);
 }
@@ -276,6 +431,12 @@ async function handleType(params) {
   const clear = params.clear !== false;
 
   if (target.isContentEditable || target.getAttribute("contenteditable") === "true") {
+    if (isProseMirrorElement(target)) {
+      const pmResult = await proseMirrorInsertText(target, text, clear && !append);
+      if (pmResult && pmResult.ok) {
+        return { typed: true, element: elementSummary(target), length: text.length, prosemirror: true };
+      }
+    }
     if (clear) target.textContent = "";
     target.textContent = append ? `${target.textContent}${text}` : text;
     if (params.dispatchEvents !== false) {
@@ -586,9 +747,20 @@ async function handleFillForm(params) {
 
       } else if (el.isContentEditable || el.getAttribute("contenteditable") === "true") {
         el.focus();
-        el.textContent = field.value || "";
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
+        if (isProseMirrorElement(el)) {
+          const pmResult = await proseMirrorInsertText(el, field.value || "", true);
+          if (pmResult && pmResult.ok) {
+            results.push({ selector: field.selector, ok: true, type: "prosemirror", value: pmResult.text || field.value });
+          } else {
+            el.textContent = field.value || "";
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
+          }
+        } else {
+          el.textContent = field.value || "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
+        }
 
       } else {
         results.push({ selector: field.selector, ok: false, error: "Unknown field type" });
@@ -1067,9 +1239,13 @@ async function handleEvaluate(params) {
     throw new Error("Missing script parameter");
   }
 
+  if (params.pageWorld) {
+    const result = await runInPageWorld(params.script);
+    if (!result.ok) throw new Error(result.error || 'Page world eval failed');
+    return { result: result.value, type: typeof result.value, pageWorld: true };
+  }
+
   try {
-    // Use Function constructor to evaluate in global scope
-    // This is safer than eval() and works similarly
     const fn = new Function(params.script);
     const result = fn();
 
