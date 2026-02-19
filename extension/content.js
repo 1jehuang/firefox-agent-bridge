@@ -46,6 +46,15 @@ function runInPageWorld(code) {
   });
 }
 
+function simulateEnterKey(el) {
+  const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+  el.dispatchEvent(new KeyboardEvent('keydown', opts));
+  el.dispatchEvent(new KeyboardEvent('keypress', opts));
+  el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertParagraph' }));
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: false, inputType: 'insertParagraph' }));
+  el.dispatchEvent(new KeyboardEvent('keyup', opts));
+}
+
 function contentEditableInsertText(el, text, clear) {
   try {
     const pageWin = window.wrappedJSObject;
@@ -58,12 +67,87 @@ function contentEditableInsertText(el, text, clear) {
     } else {
       sel.collapseToEnd();
     }
-    const ok = pageWin.document.execCommand('insertText', false, text);
-    if (!ok) return { ok: false, error: 'execCommand returned false' };
+    const hasNewlines = text.includes('\n');
+    if (!hasNewlines) {
+      const ok = pageWin.document.execCommand('insertText', false, text);
+      if (!ok) return { ok: false, error: 'execCommand returned false' };
+      return { ok: true, text: el.textContent };
+    }
+    // Multiline: try beforeinput events in page world (needed for Lexical)
+    // Use cloneInto to create events visible to page-world listeners (bypasses CSP unlike eval)
+    const lines = text.split('\n');
+    let usedBeforeInput = false;
+    try {
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          const paraOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertParagraph' }, pageWin);
+          const paraEvent = new pageWin.InputEvent('beforeinput', paraOpts);
+          el.dispatchEvent(paraEvent);
+        }
+        if (lines[i].length > 0) {
+          const textOpts = cloneInto({ bubbles: true, cancelable: true, inputType: 'insertText', data: lines[i] }, pageWin);
+          const textEvent = new pageWin.InputEvent('beforeinput', textOpts);
+          el.dispatchEvent(textEvent);
+        }
+      }
+      const paraCount = el.querySelectorAll('p').length;
+      if (paraCount > 1) {
+        usedBeforeInput = true;
+        return { ok: true, text: el.textContent, paragraphs: paraCount };
+      }
+    } catch (e) { /* cloneInto/beforeinput failed */ }
+    // Fallback: execCommand insertParagraph (works for Draft.js, TinyMCE, ProseMirror)
+    if (!usedBeforeInput) {
+      sel.selectAllChildren(el);
+      pageWin.document.execCommand('delete', false, null);
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) pageWin.document.execCommand('insertParagraph', false, null);
+        if (lines[i].length > 0) pageWin.document.execCommand('insertText', false, lines[i]);
+      }
+    }
     return { ok: true, text: el.textContent };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }
+}
+
+function querySelectorDeep(root, selector, opts = {}) {
+  const { preferVisible = true, all = false } = opts;
+  const results = [];
+  function search(node) {
+    try {
+      const matches = node.querySelectorAll(selector);
+      for (const m of matches) results.push(m);
+    } catch (e) {}
+    const children = node.querySelectorAll('*');
+    for (const child of children) {
+      if (child.shadowRoot) search(child.shadowRoot);
+    }
+    if (node.shadowRoot) search(node.shadowRoot);
+  }
+  search(root);
+  if (all) return results;
+  if (!preferVisible || results.length <= 1) return results[0] || null;
+  const visible = results.find(el => isElementVisible(el));
+  return visible || results[0];
+}
+
+function findEditableInShadow(el) {
+  if (!el || !el.shadowRoot) return null;
+  const sr = el.shadowRoot;
+  const textarea = sr.querySelector('textarea');
+  if (textarea) return textarea;
+  const input = sr.querySelector('input:not([type=hidden])');
+  if (input) return input;
+  const ce = sr.querySelector('[contenteditable=true]');
+  if (ce) return ce;
+  for (const child of sr.querySelectorAll('*')) {
+    if (child.shadowRoot) {
+      const found = findEditableInShadow(child);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 function textIncludes(haystack, needleLower) {
@@ -88,52 +172,67 @@ function findByText(text) {
   const needleLower = text.toLowerCase();
   const root = document.body || document.documentElement;
   if (!root) return null;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node = walker.nextNode();
-  let fallback = null; // Store first match as fallback
-  while (node) {
-    if (textIncludes(node.nodeValue, needleLower)) {
-      const el = node.parentElement || node.parentNode;
-      if (isElementVisible(el)) {
-        return el; // Return first VISIBLE match
+  let fallback = null;
+  function walkNode(node) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+    let textNode = walker.nextNode();
+    while (textNode) {
+      if (textIncludes(textNode.nodeValue, needleLower)) {
+        const el = textNode.parentElement || textNode.parentNode;
+        if (isElementVisible(el)) return el;
+        if (!fallback) fallback = el;
       }
-      if (!fallback) fallback = el; // Keep first match as fallback
+      textNode = walker.nextNode();
     }
-    node = walker.nextNode();
+    const allEls = node.querySelectorAll('*');
+    for (const el of allEls) {
+      if (el.shadowRoot) {
+        const found = walkNode(el.shadowRoot);
+        if (found) return found;
+      }
+    }
+    return null;
   }
-  return fallback; // Return fallback if no visible match found
+  return walkNode(root) || fallback;
 }
 
 function resolveElement(params) {
-  // Try primary selector first
+  const root = document;
   if (params.selector) {
-    const el = document.querySelector(params.selector);
-    if (el) return el;
+    const el = root.querySelector(params.selector);
+    if (el) {
+      if (!params._preferVisible) return el;
+      const all = root.querySelectorAll(params.selector);
+      if (all.length <= 1) return el;
+      for (const candidate of all) {
+        if (isElementVisible(candidate)) return candidate;
+      }
+      return el;
+    }
+    const deep = querySelectorDeep(root, params.selector, { preferVisible: true });
+    if (deep) return deep;
   }
 
-  // Try text match
   if (params.text) {
     const el = findByText(params.text);
     if (el) return el;
   }
 
-  // Try coordinates
   if (Number.isFinite(params.x) && Number.isFinite(params.y)) {
     return document.elementFromPoint(params.x, params.y);
   }
 
-  // Smart fallbacks if selector failed
   if (params.selector && params.smartFallback !== false) {
-    // Try variations of the selector
     const fallbacks = generateSelectorFallbacks(params.selector);
-    for (const fallback of fallbacks) {
+    for (const fb of fallbacks) {
       try {
-        const el = document.querySelector(fallback);
+        const el = root.querySelector(fb);
         if (el) return el;
-      } catch (e) { /* invalid selector */ }
+        const deep = querySelectorDeep(root, fb, { preferVisible: true });
+        if (deep) return deep;
+      } catch (e) {}
     }
 
-    // Last resort: try to find by partial text in selector
     const textMatch = params.selector.match(/["']([^"']+)["']/);
     if (textMatch) {
       const el = findByText(textMatch[1]);
@@ -242,12 +341,10 @@ async function handleClick(params) {
 function isEditable(el) {
   if (!el) return false;
   const tag = el.tagName;
-  return (
-    el.isContentEditable ||
-    tag === "INPUT" ||
-    tag === "TEXTAREA" ||
-    el.getAttribute("contenteditable") === "true"
-  );
+  if (el.isContentEditable || tag === "INPUT" || tag === "TEXTAREA" ||
+      el.getAttribute("contenteditable") === "true") return true;
+  if (el.shadowRoot && findEditableInShadow(el)) return true;
+  return false;
 }
 
 // React-compatible input value setter
@@ -325,8 +422,16 @@ function setInputValueReact(el, value) {
 
 async function handleType(params) {
   if (!params || !params.text) throw new Error("Missing text parameter");
-  const target = resolveElement(params || {});
+  let target = resolveElement({ ...params, _preferVisible: true });
   if (!target) throw new Error("Element not found");
+
+  // If target is a custom element with shadow DOM, find the actual editable inside
+  if (!target.isContentEditable && target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" &&
+      target.getAttribute("contenteditable") !== "true" && target.shadowRoot) {
+    const inner = findEditableInShadow(target);
+    if (inner) target = inner;
+  }
+
   if (!isEditable(target)) throw new Error("Target element is not editable");
 
   if (params.scrollIntoView !== false && target.scrollIntoView) {
@@ -592,37 +697,50 @@ async function handleFillForm(params) {
   const results = [];
 
   for (const field of params.fields) {
-    const el = field.selector ? document.querySelector(field.selector) : null;
+    let el = field.selector ? document.querySelector(field.selector) : null;
+    if (!el) {
+      el = field.selector ? querySelectorDeep(document, field.selector, { preferVisible: true }) : null;
+    }
     if (!el) {
       results.push({ selector: field.selector, ok: false, error: "Element not found" });
       continue;
     }
 
     try {
-      const tagName = el.tagName;
-      const inputType = el.type ? el.type.toLowerCase() : "";
+      // If el is a custom element with shadow DOM containing an editable, unwrap it
+      let actual = el;
+      const tagName = actual.tagName;
+      const inputType = actual.type ? actual.type.toLowerCase() : "";
+
+      if (tagName !== "INPUT" && tagName !== "TEXTAREA" && tagName !== "SELECT" &&
+          !actual.isContentEditable && actual.getAttribute("contenteditable") !== "true") {
+        const inner = findEditableInShadow(actual);
+        if (inner) actual = inner;
+      }
+
+      const actualTag = actual.tagName;
+      const actualType = actual.type ? actual.type.toLowerCase() : "";
 
       // Handle different field types
-      if (tagName === "INPUT" && inputType === "checkbox") {
+      if (actualTag === "INPUT" && actualType === "checkbox") {
         const shouldCheck = field.checked !== false && field.value !== false;
-        if (el.checked !== shouldCheck) {
-          el.checked = shouldCheck;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
+        if (actual.checked !== shouldCheck) {
+          actual.checked = shouldCheck;
+          actual.dispatchEvent(new Event("change", { bubbles: true }));
         }
-        results.push({ selector: field.selector, ok: true, type: "checkbox", checked: el.checked });
+        results.push({ selector: field.selector, ok: true, type: "checkbox", checked: actual.checked });
 
-      } else if (tagName === "INPUT" && inputType === "radio") {
-        el.checked = true;
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else if (actualTag === "INPUT" && actualType === "radio") {
+        actual.checked = true;
+        actual.dispatchEvent(new Event("change", { bubbles: true }));
         results.push({ selector: field.selector, ok: true, type: "radio", checked: true });
 
-      } else if (tagName === "SELECT") {
-        el.value = field.value || "";
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        results.push({ selector: field.selector, ok: true, type: "select", value: el.value });
+      } else if (actualTag === "SELECT") {
+        actual.value = field.value || "";
+        actual.dispatchEvent(new Event("change", { bubbles: true }));
+        results.push({ selector: field.selector, ok: true, type: "select", value: actual.value });
 
-      } else if (tagName === "INPUT" && inputType === "file") {
-        // File input - expects field.file with {name, type, data (base64)}
+      } else if (actualTag === "INPUT" && actualType === "file") {
         if (!field.file || !field.file.data) {
           results.push({ selector: field.selector, ok: false, error: "Missing file data" });
           continue;
@@ -638,32 +756,31 @@ async function handleFillForm(params) {
           const file = new File([blob], field.file.name || "file", { type: blob.type });
           const dataTransfer = new DataTransfer();
           dataTransfer.items.add(file);
-          el.files = dataTransfer.files;
-          el.dispatchEvent(new Event("change", { bubbles: true }));
+          actual.files = dataTransfer.files;
+          actual.dispatchEvent(new Event("change", { bubbles: true }));
           results.push({ selector: field.selector, ok: true, type: "file", filename: file.name });
         } catch (fileErr) {
           results.push({ selector: field.selector, ok: false, error: fileErr.message });
         }
 
-      } else if (tagName === "TEXTAREA" || tagName === "INPUT") {
-        // Text inputs and textareas - use React-compatible setter
-        el.focus();
-        setInputValueReact(el, field.value || "");
-        results.push({ selector: field.selector, ok: true, type: "text", value: el.value });
+      } else if (actualTag === "TEXTAREA" || actualTag === "INPUT") {
+        actual.focus();
+        setInputValueReact(actual, field.value || "");
+        results.push({ selector: field.selector, ok: true, type: "text", value: actual.value });
 
-      } else if (el.isContentEditable || el.getAttribute("contenteditable") === "true") {
-        el.focus();
-        const ceResult = contentEditableInsertText(el, field.value || "", true);
+      } else if (actual.isContentEditable || actual.getAttribute("contenteditable") === "true") {
+        actual.focus();
+        const ceResult = contentEditableInsertText(actual, field.value || "", true);
         if (ceResult && ceResult.ok) {
           results.push({ selector: field.selector, ok: true, type: "richEditor", value: ceResult.text || field.value });
         } else {
-          el.textContent = field.value || "";
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
+          actual.textContent = field.value || "";
+          actual.dispatchEvent(new Event("input", { bubbles: true }));
+          results.push({ selector: field.selector, ok: true, type: "contenteditable", value: actual.textContent });
         }
 
       } else {
-        results.push({ selector: field.selector, ok: false, error: "Unknown field type" });
+        results.push({ selector: field.selector, ok: false, error: "Unknown field type: " + actualTag });
       }
     } catch (err) {
       results.push({ selector: field.selector, ok: false, error: err.message });
