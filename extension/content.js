@@ -46,113 +46,21 @@ function runInPageWorld(code) {
   });
 }
 
-function isProseMirrorElement(el) {
-  if (!el) return false;
-  if (el.classList && el.classList.contains('ProseMirror')) return true;
-  const pm = el.closest && el.closest('.ProseMirror');
-  return !!pm;
-}
-
-function getProseMirrorSelector(el) {
-  if (!el) return null;
-  const pm = el.classList.contains('ProseMirror') ? el : el.closest('.ProseMirror');
-  if (!pm) return null;
-  if (pm.id) return '#' + pm.id;
-  const parent = pm.parentElement;
-  if (parent && parent.id) return '#' + parent.id + ' .ProseMirror';
-  const path = [];
-  let node = pm;
-  while (node && node !== document.body && path.length < 4) {
-    let sel = node.tagName.toLowerCase();
-    if (node.id) { path.unshift('#' + node.id); break; }
-    if (node.className && typeof node.className === 'string') {
-      const cls = node.className.split(' ').filter(c => c && !c.includes(':'))[0];
-      if (cls) sel += '.' + cls;
-    }
-    path.unshift(sel);
-    node = node.parentElement;
-  }
-  return path.join(' > ');
-}
-
-async function proseMirrorInsertText(el, text, clear) {
+function contentEditableInsertText(el, text, clear) {
   try {
-    const pageWindow = window.wrappedJSObject;
-    if (!pageWindow) return { ok: false, error: 'no wrappedJSObject' };
-
-    const pmEl = el.classList.contains('ProseMirror') ? el : el.closest('.ProseMirror');
-    if (!pmEl) return { ok: false, error: 'not a PM element' };
-
-    let view = null;
-
-    // Strategy 1: Check global view registries
-    const registries = [
-      pageWindow.__prosemirrorViews,
-      pageWindow.__tiptapInstances,
-      pageWindow.__editorViews
-    ];
-    for (const views of registries) {
-      if (!views) continue;
-      const keys = Object.keys(views);
-      for (let i = 0; i < keys.length; i++) {
-        const v = views[keys[i]];
-        if (v && v.dom) {
-          // Compare using parent element ID or DOM identity
-          const vDom = v.dom;
-          const pmWrapped = pmEl.wrappedJSObject || pmEl;
-          if (vDom === pmWrapped || (pmEl.id && vDom.id === pmEl.id)) {
-            view = v;
-            break;
-          }
-          // Fallback: compare parent IDs
-          const vParent = vDom.parentElement;
-          const pmParent = pmEl.parentElement;
-          if (vParent && pmParent && vParent.id && vParent.id === pmParent.id) {
-            view = v;
-            break;
-          }
-        }
-      }
-      if (view) break;
-    }
-
-    // Strategy 2: Walk up DOM looking for pmViewDesc (ProseMirror internal)
-    if (!view) {
-      const wrapped = pmEl.wrappedJSObject || pmEl;
-      if (wrapped.pmViewDesc) {
-        const desc = wrapped.pmViewDesc;
-        view = desc.view || desc;
-      }
-    }
-
-    // Strategy 3: If only one view exists and we found PM element, use it
-    if (!view && pageWindow.__prosemirrorViews) {
-      const allViews = pageWindow.__prosemirrorViews;
-      const keys = Object.keys(allViews);
-      if (keys.length === 1) {
-        view = allViews[keys[0]];
-      }
-    }
-
-    if (!view || !view.state) return { ok: false, error: 'no PM view found' };
-
-    const tr = view.state.tr;
+    const pageWin = window.wrappedJSObject;
+    if (!pageWin) return { ok: false, error: 'no wrappedJSObject' };
+    el.focus();
+    const sel = window.getSelection();
     if (clear) {
-      tr.delete(0, tr.doc.content.size);
-    }
-    if (clear) {
-      tr.insertText(text, 0);
+      sel.selectAllChildren(el);
+      pageWin.document.execCommand('delete', false, null);
     } else {
-      const end = tr.doc.content.size;
-      if (end > 2) {
-        tr.insertText(text, end - 1);
-      } else {
-        tr.insertText(text);
-      }
+      sel.collapseToEnd();
     }
-    view.dispatch(tr);
-
-    return { ok: true, text: view.state.doc.textContent };
+    const ok = pageWin.document.execCommand('insertText', false, text);
+    if (!ok) return { ok: false, error: 'execCommand returned false' };
+    return { ok: true, text: el.textContent };
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }
@@ -431,11 +339,9 @@ async function handleType(params) {
   const clear = params.clear !== false;
 
   if (target.isContentEditable || target.getAttribute("contenteditable") === "true") {
-    if (isProseMirrorElement(target)) {
-      const pmResult = await proseMirrorInsertText(target, text, clear && !append);
-      if (pmResult && pmResult.ok) {
-        return { typed: true, element: elementSummary(target), length: text.length, prosemirror: true };
-      }
+    const ceResult = contentEditableInsertText(target, text, clear && !append);
+    if (ceResult && ceResult.ok) {
+      return { typed: true, element: elementSummary(target), length: text.length, richEditor: true };
     }
     if (clear) target.textContent = "";
     target.textContent = append ? `${target.textContent}${text}` : text;
@@ -747,15 +653,9 @@ async function handleFillForm(params) {
 
       } else if (el.isContentEditable || el.getAttribute("contenteditable") === "true") {
         el.focus();
-        if (isProseMirrorElement(el)) {
-          const pmResult = await proseMirrorInsertText(el, field.value || "", true);
-          if (pmResult && pmResult.ok) {
-            results.push({ selector: field.selector, ok: true, type: "prosemirror", value: pmResult.text || field.value });
-          } else {
-            el.textContent = field.value || "";
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            results.push({ selector: field.selector, ok: true, type: "contenteditable", value: el.textContent });
-          }
+        const ceResult = contentEditableInsertText(el, field.value || "", true);
+        if (ceResult && ceResult.ok) {
+          results.push({ selector: field.selector, ok: true, type: "richEditor", value: ceResult.text || field.value });
         } else {
           el.textContent = field.value || "";
           el.dispatchEvent(new Event("input", { bubbles: true }));

@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-02-19T11:07:08.953Z",
+  "passed": 8,
+  "failed": 0,
+  "totalTime": 16379,
+  "results": [
+    {
+      "name": "type-basic",
+      "pass": true,
+      "elapsed": 2066,
+      "pmText": "Hello from the agent!",
+      "usedRichEditorPath": true
+    },
+    {
+      "name": "type-replace",
+      "pass": true,
+      "elapsed": 2036,
+      "pmText": "Brand new content!"
+    },
+    {
+      "name": "type-append",
+      "pass": true,
+      "elapsed": 2220,
+      "pmText": "First. Second."
+    },
+    {
+      "name": "fillform-pm",
+      "pass": true,
+      "elapsed": 2033
+    },
+    {
+      "name": "form-mixed",
+      "pass": true,
+      "elapsed": 2379
+    },
+    {
+      "name": "rich-format-via-eval",
+      "pass": true,
+      "elapsed": 1789
+    },
+    {
+      "name": "detect-pm-editors",
+      "pass": true,
+      "elapsed": 1811
+    },
+    {
+      "name": "state-sync",
+      "pass": true,
+      "elapsed": 2045,
+      "pmText": "State sync test content."
+    }
+  ]
+}

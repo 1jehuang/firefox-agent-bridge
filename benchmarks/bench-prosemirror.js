@@ -81,11 +81,11 @@ const TESTS = {
       );
 
       const pmText = check?.result?.pmText || '';
-      const isPM = typeResult?.prosemirror === true;
+      const isRichEditor = typeResult?.richEditor === true;
       return {
-        typeResult: { typed: typeResult?.typed, prosemirror: typeResult?.prosemirror },
+        typeResult: { typed: typeResult?.typed, richEditor: typeResult?.richEditor },
         pmText,
-        usedProseMirrorPath: isPM,
+        usedRichEditorPath: isRichEditor,
         pass: pmText.includes('Hello from the agent')
       };
     }
@@ -376,7 +376,7 @@ function main() {
   console.log('\n📋 Summary:');
   const typeTest = results.find(r => r.name === 'type-basic');
   if (typeTest) {
-    console.log(`  type action:     ${typeTest.pass ? '✅ Works' : '❌ Broken'} (PM path: ${typeTest.usedProseMirrorPath ? 'yes' : 'no'})`);
+    console.log(`  type action:     ${typeTest.pass ? '✅ Works' : '❌ Broken'} (execCommand: ${typeTest.usedRichEditorPath ? 'yes' : 'no'})`);
   }
   const fillTest = results.find(r => r.name === 'fillform-pm');
   if (fillTest) {
@@ -394,7 +394,7 @@ function main() {
     passed, failed, totalTime,
     results: results.map(r => ({
       name: r.name, pass: r.pass, elapsed: r.elapsed,
-      pmText: r.pmText, usedProseMirrorPath: r.usedProseMirrorPath
+      pmText: r.pmText, usedRichEditorPath: r.usedRichEditorPath
     }))
   }, null, 2));
   console.log(`\n📄 Saved to ${resultFile}`);

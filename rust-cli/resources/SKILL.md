@@ -86,7 +86,29 @@ browser <action> '<json_params>'
 
 ---
 
-## Recommended Workflow
+## Rich Text Editors (ProseMirror, Lexical, Slate, etc.)
+
+The `type` and `fillForm` actions automatically handle rich text editors (ProseMirror, Lexical/Reddit, Draft.js, Tiptap, Slate, CKEditor, Quill). They use `document.execCommand("insertText")` in the page world, which works with any `contenteditable`-based editor.
+
+```bash
+# Works on any rich text editor — ProseMirror, Lexical, etc.
+browser type '{"selector": "div[contenteditable=true]", "text": "Hello world!"}'
+# Response includes richEditor: true when execCommand path was used
+
+# Clear existing content and replace
+browser type '{"selector": ".ProseMirror", "text": "New content", "clear": true}'
+
+# Fill multiple rich text fields in a form
+browser fillForm '{"fields": [
+  {"selector": "#title", "value": "My Title"},
+  {"selector": "#body .ProseMirror", "value": "Article body text"}
+]}'
+```
+
+No special handling needed — just use `type` or `fillForm` as normal. Falls back to `textContent` assignment if `execCommand` isn't available.
+
+---
+
 
 ### 1. Start by Inspecting Available Tabs
 
@@ -298,7 +320,22 @@ browser evaluate '{"script": "return Array.from(document.querySelectorAll(\"inpu
 # Returns: {"result": ["option1", "option3"], "type": "object"}
 ```
 
-**Note:** Use `return` to get a value back. The script runs in page context with full DOM access.
+### Page World Evaluation
+
+By default, `evaluate` runs in the content script's isolated world. To access page-level JavaScript variables (e.g., framework state, global objects set by the page), use `pageWorld: true`:
+
+```bash
+# Access page-level globals (React state, editor instances, app data)
+browser evaluate '{"script": "return window.__NEXT_DATA__", "pageWorld": true}'
+
+# Interact with ProseMirror/Lexical internals
+browser evaluate '{"script": "return Object.keys(window.__prosemirrorViews || {})", "pageWorld": true}'
+
+# Call page-level functions
+browser evaluate '{"script": "return window.myApp.getState()", "pageWorld": true}'
+```
+
+**Note:** Use `return` to get a value back. The script runs with full DOM access. Use `pageWorld: true` when you need to access variables set by the page's own JavaScript.
 
 ---
 
