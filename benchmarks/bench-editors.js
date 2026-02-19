@@ -74,43 +74,14 @@ function createTestFile(name, content, binary = false) {
   return p;
 }
 
-// Upload file via fillForm (reliable path — uploadFile CLI has a response bug)
+// Upload file via CLI uploadFile action
 function uploadFile(selector, filePath) {
-  const fileBytes = fs.readFileSync(filePath);
-  const base64Data = fileBytes.toString('base64');
-  const fileName = path.basename(filePath);
-  const ext = path.extname(filePath).slice(1);
-  const mimeMap = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', txt: 'text/plain', mp4: 'video/mp4', webm: 'video/webm' };
-  const mimeType = mimeMap[ext] || 'application/octet-stream';
-  return browserCmd('fillForm', {
-    fields: [{ selector, file: { name: fileName, type: mimeType, data: base64Data } }]
-  });
+  return browserCmd('uploadFile', { selector, path: filePath });
 }
 
-// Drop file via evaluate in page world (content script DataTransfer is restricted)
+// Drop file via CLI dropFile action
 function dropFile(selector, filePath) {
-  const fileBytes = fs.readFileSync(filePath);
-  const base64Data = fileBytes.toString('base64');
-  const fileName = path.basename(filePath);
-  const ext = path.extname(filePath).slice(1);
-  const mimeMap = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', txt: 'text/plain', mp4: 'video/mp4' };
-  const mimeType = mimeMap[ext] || 'application/octet-stream';
-  return evaluate(
-    'var target=document.querySelector("' + selector.replace(/"/g, '\\"') + '");' +
-    'if(!target)return{ok:false,error:"no target"};' +
-    'var b64="' + base64Data + '";' +
-    'var bytes=atob(b64);var ab=new ArrayBuffer(bytes.length);var ia=new Uint8Array(ab);' +
-    'for(var i=0;i<bytes.length;i++)ia[i]=bytes.charCodeAt(i);' +
-    'var blob=new Blob([ab],{type:"' + mimeType + '"});' +
-    'var file=new File([blob],"' + fileName + '",{type:"' + mimeType + '"});' +
-    'var dt=new DataTransfer();dt.items.add(file);' +
-    'var props={bubbles:true,cancelable:true,dataTransfer:dt};' +
-    'target.dispatchEvent(new DragEvent("dragenter",props));' +
-    'target.dispatchEvent(new DragEvent("dragover",props));' +
-    'target.dispatchEvent(new DragEvent("drop",props));' +
-    'return{ok:true,name:"' + fileName + '"}',
-    true  // pageWorld — needed so DataTransfer.files survives to page handlers
-  );
+  return browserCmd('dropFile', { selector, path: filePath });
 }
 
 // Minimal 1x1 red PNG (base64)

@@ -1348,7 +1348,7 @@ function handleUploadFile(params) {
 }
 
 // Handle file drop - simulates drag-and-drop onto a target element
-// Works with sites like Gmail where file input change events are ignored
+// Uses page world (wrappedJSObject) so DataTransfer.files survives to page handlers
 // params.selector - CSS selector for drop target (e.g., compose body)
 // params.file - { name, type, data (base64) }
 // params.files - array of { name, type, data } for multiple files
@@ -1358,7 +1358,6 @@ function handleDropFile(params) {
     throw new Error('dropFile requires file or files parameter with {name, type, data (base64)}');
   }
 
-  // Find the drop target
   const target = params.selector
     ? document.querySelector(params.selector)
     : document.querySelector('[contenteditable="true"]') || document.body;
@@ -1367,38 +1366,84 @@ function handleDropFile(params) {
     throw new Error('No drop target found');
   }
 
-  // Create File objects from base64 data
-  const dataTransfer = new DataTransfer();
   const uploadedFiles = [];
 
-  for (const fileData of fileSpecs) {
-    if (!fileData.data) {
-      throw new Error('File data (base64) is required');
+  // Build file data array for page-world injection
+  const fileDataArray = fileSpecs.map(fileData => {
+    if (!fileData.data) throw new Error('File data (base64) is required');
+    uploadedFiles.push({
+      name: fileData.name || 'file',
+      type: fileData.type || 'application/octet-stream',
+      size: Math.ceil((fileData.data.length * 3) / 4)
+    });
+    return {
+      name: fileData.name || 'file',
+      type: fileData.type || 'application/octet-stream',
+      data: fileData.data
+    };
+  });
+
+  // Execute drop in page world so DataTransfer.files is visible to page handlers
+  const pageWin = window.wrappedJSObject;
+  if (pageWin) {
+    try {
+      const filesJson = JSON.stringify(fileDataArray);
+      const sel = (params.selector || '').replace(/'/g, "\\'");
+      const code = `(function(){
+        var target = document.querySelector('${sel}') || document.querySelector('[contenteditable="true"]') || document.body;
+        var files = ${filesJson};
+        var dt = new DataTransfer();
+        for (var i = 0; i < files.length; i++) {
+          var f = files[i];
+          var bytes = atob(f.data);
+          var ab = new ArrayBuffer(bytes.length);
+          var ia = new Uint8Array(ab);
+          for (var j = 0; j < bytes.length; j++) ia[j] = bytes.charCodeAt(j);
+          var blob = new Blob([ab], {type: f.type});
+          var file = new File([blob], f.name, {type: f.type});
+          dt.items.add(file);
+        }
+        var props = {bubbles: true, cancelable: true, dataTransfer: dt};
+        target.dispatchEvent(new DragEvent('dragenter', props));
+        target.dispatchEvent(new DragEvent('dragover', props));
+        target.dispatchEvent(new DragEvent('drop', props));
+        return dt.files.length;
+      })()`;
+      pageWin.eval(code);
+    } catch (e) {
+      // Fallback to content-script dispatch (may not carry files through)
+      const dataTransfer = new DataTransfer();
+      for (const fileData of fileSpecs) {
+        const byteString = atob(fileData.data);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: fileData.type || 'application/octet-stream' });
+        const file = new File([blob], fileData.name || 'file', { type: blob.type });
+        dataTransfer.items.add(file);
+      }
+      const eventProps = { bubbles: true, cancelable: true, dataTransfer };
+      target.dispatchEvent(new DragEvent('dragenter', eventProps));
+      target.dispatchEvent(new DragEvent('dragover', eventProps));
+      target.dispatchEvent(new DragEvent('drop', eventProps));
     }
-    const byteString = atob(fileData.data);
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
-    for (let i = 0; i < byteString.length; i++) {
-      ia[i] = byteString.charCodeAt(i);
+  } else {
+    // No wrappedJSObject — fallback
+    const dataTransfer = new DataTransfer();
+    for (const fileData of fileSpecs) {
+      const byteString = atob(fileData.data);
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const blob = new Blob([ab], { type: fileData.type || 'application/octet-stream' });
+      const file = new File([blob], fileData.name || 'file', { type: blob.type });
+      dataTransfer.items.add(file);
     }
-    const mimeType = fileData.type || 'application/octet-stream';
-    const blob = new Blob([ab], { type: mimeType });
-    const file = new File([blob], fileData.name || 'file', { type: mimeType });
-    dataTransfer.items.add(file);
-    uploadedFiles.push({ name: file.name, type: file.type, size: file.size });
+    const eventProps = { bubbles: true, cancelable: true, dataTransfer };
+    target.dispatchEvent(new DragEvent('dragenter', eventProps));
+    target.dispatchEvent(new DragEvent('dragover', eventProps));
+    target.dispatchEvent(new DragEvent('drop', eventProps));
   }
-
-  // Simulate full drag-and-drop sequence
-  const eventProps = {
-    bubbles: true,
-    cancelable: true,
-    dataTransfer: dataTransfer
-  };
-
-  target.dispatchEvent(new DragEvent('dragenter', eventProps));
-  target.dispatchEvent(new DragEvent('dragover', eventProps));
-  target.dispatchEvent(new DragEvent('drop', eventProps));
-  target.dispatchEvent(new DragEvent('dragleave', eventProps));
 
   return {
     dropped: true,
