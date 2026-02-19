@@ -1,0 +1,49 @@
+{
+  "timestamp": "2026-02-19T11:33:28.763Z",
+  "server": "http://localhost:3456",
+  "passed": 8,
+  "failed": 0,
+  "totalTime": 10310,
+  "results": [
+    {
+      "name": "upload-single-file",
+      "pass": true,
+      "elapsed": 1296
+    },
+    {
+      "name": "upload-image",
+      "pass": true,
+      "elapsed": 1248
+    },
+    {
+      "name": "upload-video",
+      "pass": true,
+      "elapsed": 1249
+    },
+    {
+      "name": "upload-multi-file",
+      "pass": true,
+      "elapsed": 1242
+    },
+    {
+      "name": "upload-drop-zone",
+      "pass": true,
+      "elapsed": 1344
+    },
+    {
+      "name": "upload-drop-on-editor",
+      "pass": true,
+      "elapsed": 1374
+    },
+    {
+      "name": "upload-pdf",
+      "pass": true,
+      "elapsed": 1267
+    },
+    {
+      "name": "upload-hidden-input",
+      "pass": true,
+      "elapsed": 1290
+    }
+  ]
+}

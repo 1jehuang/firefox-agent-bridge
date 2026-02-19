@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draft.js Editor - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    .compose-container {
+      margin: 20px 0; border: 1px solid #cfd9de; border-radius: 16px;
+      padding: 16px; background: white;
+    }
+    .compose-label { font-weight: bold; margin-bottom: 8px; display: block; color: #536471; }
+
+    /* Draft.js editor structure — mirrors X/Twitter's compose box */
+    .DraftEditor-root { position: relative; }
+    .DraftEditor-editorContainer { position: relative; }
+    .public-DraftEditor-content {
+      min-height: 80px; outline: none; user-select: text;
+      white-space: pre-wrap; word-wrap: break-word;
+      font-size: 20px; line-height: 1.3; color: #0f1419;
+    }
+    .public-DraftEditor-content[data-placeholder]:empty::before {
+      content: attr(data-placeholder); color: #536471; pointer-events: none;
+    }
+    .public-DraftStyleDefault-block { position: relative; white-space: pre-wrap; }
+    .public-DraftStyleDefault-ltr { direction: ltr; text-align: left; }
+
+    /* Compose footer / buttons */
+    .compose-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid #eff3f4;
+    }
+    .compose-actions { display: flex; gap: 8px; }
+    .compose-actions button {
+      background: none; border: none; cursor: pointer;
+      color: #1d9bf0; font-size: 18px; padding: 6px; border-radius: 50%;
+    }
+    .compose-actions button:hover { background: rgba(29,155,240,0.1); }
+    .char-counter {
+      font-size: 14px; color: #536471; min-width: 40px; text-align: right;
+    }
+    .char-counter.warning { color: #f4212e; }
+    .post-btn {
+      background: #1d9bf0; color: white; border: none; border-radius: 9999px;
+      padding: 8px 20px; font-weight: bold; font-size: 15px; cursor: pointer;
+    }
+    .post-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .post-btn:not(:disabled):hover { background: #1a8cd8; }
+
+    /* Multiple editors section */
+    .editor-section { margin-bottom: 30px; }
+    .editor-section h2 { color: #333; font-size: 18px; }
+
+    /* Status area */
+    #status { margin-top: 20px; padding: 12px; background: #f7f9fa; border-radius: 8px; font-family: monospace; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Draft.js Editor Test Page</h1>
+  <p>Simulates X/Twitter's compose box using Draft.js-like structure.</p>
+
+  <!-- Editor 1: Main compose box (like X compose dialog) -->
+  <div class="editor-section">
+    <h2>1. Compose Post (like X/Twitter dialog)</h2>
+    <div class="compose-container" id="compose1">
+      <div class="DraftEditor-root">
+        <div class="DraftEditor-editorContainer">
+          <div class="notranslate public-DraftEditor-content"
+               contenteditable="true"
+               role="textbox"
+               aria-label="Post text"
+               aria-multiline="true"
+               data-testid="tweetTextarea_0"
+               data-placeholder="What's happening?"
+               data-contents="true"
+               spellcheck="true">
+            <div data-contents="true">
+              <div class="" data-block="true" data-editor="editor1" data-offset-key="1a-0-0">
+                <div data-offset-key="1a-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr">
+                  <span data-offset-key="1a-0-0"><br data-text="true"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="compose-footer">
+        <div class="compose-actions">
+          <button title="Media">🖼</button>
+          <button title="GIF">GIF</button>
+          <button title="Poll">📊</button>
+          <button title="Emoji">😊</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="char-counter" id="charCount1">0/280</span>
+          <button class="post-btn" id="postBtn1" data-testid="tweetButton" disabled>Post</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor 2: Reply box (like X reply) -->
+  <div class="editor-section">
+    <h2>2. Reply Box (secondary compose)</h2>
+    <div class="compose-container" id="compose2">
+      <div style="color:#536471;margin-bottom:8px">Replying to <span style="color:#1d9bf0">@benchmark_user</span></div>
+      <div class="DraftEditor-root">
+        <div class="DraftEditor-editorContainer">
+          <div class="notranslate public-DraftEditor-content"
+               contenteditable="true"
+               role="textbox"
+               aria-label="Post your reply"
+               aria-multiline="true"
+               data-testid="tweetTextarea_0_reply"
+               data-placeholder="Post your reply"
+               data-contents="true"
+               spellcheck="true">
+            <div data-contents="true">
+              <div class="" data-block="true" data-editor="editor2" data-offset-key="2a-0-0">
+                <div data-offset-key="2a-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr">
+                  <span data-offset-key="2a-0-0"><br data-text="true"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="compose-footer">
+        <div class="compose-actions">
+          <button title="Media">🖼</button>
+          <button title="Emoji">😊</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="char-counter" id="charCount2">0/280</span>
+          <button class="post-btn" id="postBtn2" disabled>Reply</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor 3: Quote tweet (pre-filled, like editing a draft) -->
+  <div class="editor-section">
+    <h2>3. Quote Post (pre-filled content)</h2>
+    <div class="compose-container" id="compose3">
+      <div class="DraftEditor-root">
+        <div class="DraftEditor-editorContainer">
+          <div class="notranslate public-DraftEditor-content"
+               contenteditable="true"
+               role="textbox"
+               aria-label="Add a comment"
+               aria-multiline="true"
+               data-testid="tweetTextarea_0_quote"
+               data-placeholder="Add a comment"
+               data-contents="true"
+               spellcheck="true">
+            <div data-contents="true">
+              <div class="" data-block="true" data-editor="editor3" data-offset-key="3a-0-0">
+                <div data-offset-key="3a-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr">
+                  <span data-offset-key="3a-0-0">This is interesting! Check out this thread 🧵</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="border:1px solid #cfd9de;border-radius:12px;padding:12px;margin-top:12px;color:#536471">
+        <div style="font-weight:bold;color:#0f1419">@original_poster</div>
+        <div>Original post content that is being quoted...</div>
+      </div>
+      <div class="compose-footer">
+        <div class="compose-actions"></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="char-counter" id="charCount3">44/280</span>
+          <button class="post-btn" id="postBtn3">Post</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status">Status: Ready</div>
+
+  <script>
+    // Wire up Draft.js-like behavior for each editor
+    const editors = [
+      { el: document.querySelector('#compose1 .public-DraftEditor-content'), counter: 'charCount1', btn: 'postBtn1' },
+      { el: document.querySelector('#compose2 .public-DraftEditor-content'), counter: 'charCount2', btn: 'postBtn2' },
+      { el: document.querySelector('#compose3 .public-DraftEditor-content'), counter: 'charCount3', btn: 'postBtn3' },
+    ];
+
+    function getEditorText(el) {
+      return el.innerText.replace(/\n$/, '');
+    }
+
+    function updateState(cfg) {
+      const text = getEditorText(cfg.el);
+      const len = text.length;
+      const counterEl = document.getElementById(cfg.counter);
+      const btnEl = document.getElementById(cfg.btn);
+
+      counterEl.textContent = `${len}/280`;
+      counterEl.classList.toggle('warning', len > 260);
+      btnEl.disabled = len === 0 || text.trim() === '';
+
+      document.getElementById('status').textContent =
+        `Status: Editor "${cfg.el.getAttribute('aria-label')}" — ${len} chars`;
+    }
+
+    editors.forEach(cfg => {
+      cfg.el.addEventListener('input', () => updateState(cfg));
+      cfg.el.addEventListener('focus', () => updateState(cfg));
+      // Initialize
+      updateState(cfg);
+    });
+
+    // Post buttons log but don't navigate
+    document.querySelectorAll('.post-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const container = btn.closest('.compose-container');
+        const editor = container.querySelector('.public-DraftEditor-content');
+        const text = getEditorText(editor);
+        document.getElementById('status').textContent =
+          `Status: POST submitted — "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`;
+      });
+    });
+  </script>
+</body>
+</html>

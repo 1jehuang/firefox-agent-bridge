@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Upload - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; }
+    h1 { color: #333; }
+    h2 { color: #555; font-size: 18px; margin-top: 32px; }
+
+    .upload-section { margin: 16px 0; padding: 20px; background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 8px; }
+
+    /* Drop zones */
+    .drop-zone {
+      border: 2px dashed #ccc; border-radius: 8px; padding: 40px;
+      text-align: center; color: #888; cursor: pointer; transition: all 0.2s;
+      margin: 12px 0;
+    }
+    .drop-zone:hover, .drop-zone.dragover { border-color: #4a9eff; background: #f0f7ff; color: #4a9eff; }
+    .drop-zone .icon { font-size: 36px; margin-bottom: 8px; }
+
+    /* File inputs */
+    label.file-label {
+      display: inline-block; padding: 8px 16px; background: #4a9eff; color: white;
+      border-radius: 6px; cursor: pointer; font-size: 14px;
+    }
+    label.file-label:hover { background: #3a8edd; }
+    input[type="file"].visible { display: block; margin: 8px 0; }
+
+    /* File list */
+    .file-list { list-style: none; padding: 0; margin: 12px 0; }
+    .file-list li {
+      display: flex; align-items: center; gap: 8px; padding: 8px;
+      background: white; border: 1px solid #e0e0e0; border-radius: 4px; margin: 4px 0; font-size: 13px;
+    }
+    .file-list .remove { color: #e74c3c; cursor: pointer; margin-left: auto; }
+
+    /* Preview area */
+    .preview { margin: 8px 0; max-height: 200px; overflow: auto; }
+    .preview img { max-width: 200px; max-height: 150px; border-radius: 4px; margin: 4px; }
+    .preview video { max-width: 300px; border-radius: 4px; margin: 4px; }
+
+    /* Status */
+    .section-status { font-family: monospace; font-size: 12px; color: #666; margin-top: 8px; padding: 6px 8px; background: #f0f0f0; border-radius: 4px; }
+
+    #status { margin-top: 30px; padding: 16px; background: #eef; border-radius: 8px; font-family: monospace; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>File Upload Test Page</h1>
+  <p>Tests all file upload mechanisms: input[type=file], drag-and-drop, multi-file, and various MIME types.</p>
+
+  <!-- 1. Basic single file input -->
+  <div class="upload-section" id="section1">
+    <h2>1. Single File Input</h2>
+    <p>Standard file input accepting any file.</p>
+    <input type="file" id="singleFile" class="visible">
+    <ul class="file-list" id="list1"></ul>
+    <div class="section-status" id="status1">No file selected</div>
+  </div>
+
+  <!-- 2. Image-only input -->
+  <div class="upload-section" id="section2">
+    <h2>2. Image Upload (accept=image/*)</h2>
+    <label class="file-label" for="imageFile">Choose Image</label>
+    <input type="file" id="imageFile" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none">
+    <div class="preview" id="preview2"></div>
+    <ul class="file-list" id="list2"></ul>
+    <div class="section-status" id="status2">No image selected</div>
+  </div>
+
+  <!-- 3. Video input -->
+  <div class="upload-section" id="section3">
+    <h2>3. Video Upload (accept=video/*)</h2>
+    <label class="file-label" for="videoFile">Choose Video</label>
+    <input type="file" id="videoFile" accept="video/mp4,video/webm,video/ogg" style="display:none">
+    <div class="preview" id="preview3"></div>
+    <ul class="file-list" id="list3"></ul>
+    <div class="section-status" id="status3">No video selected</div>
+  </div>
+
+  <!-- 4. Multi-file input -->
+  <div class="upload-section" id="section4">
+    <h2>4. Multiple Files (multi-select)</h2>
+    <input type="file" id="multiFile" multiple class="visible">
+    <ul class="file-list" id="list4"></ul>
+    <div class="section-status" id="status4">No files selected</div>
+  </div>
+
+  <!-- 5. Drag-and-drop zone -->
+  <div class="upload-section" id="section5">
+    <h2>5. Drag & Drop Zone</h2>
+    <div class="drop-zone" id="dropZone1">
+      <div class="icon">📂</div>
+      <p>Drop files here or click to browse</p>
+    </div>
+    <input type="file" id="dropInput1" multiple style="display:none">
+    <ul class="file-list" id="list5"></ul>
+    <div class="section-status" id="status5">No files dropped</div>
+  </div>
+
+  <!-- 6. Drop zone on contenteditable (like Gmail / chat apps) -->
+  <div class="upload-section" id="section6">
+    <h2>6. Drop-on-Editor (contenteditable)</h2>
+    <p>Drop images/files onto the editor area below (like Gmail compose):</p>
+    <div contenteditable="true"
+         id="editorDropTarget"
+         style="min-height:120px;padding:12px;border:2px solid #ccc;border-radius:6px;outline:none;line-height:1.5"
+         data-placeholder="Type here, or drop files...">
+    </div>
+    <ul class="file-list" id="list6"></ul>
+    <div class="section-status" id="status6">No files dropped on editor</div>
+  </div>
+
+  <!-- 7. PDF-specific upload -->
+  <div class="upload-section" id="section7">
+    <h2>7. PDF Document Upload</h2>
+    <label class="file-label" for="pdfFile">Upload PDF</label>
+    <input type="file" id="pdfFile" accept=".pdf,application/pdf" style="display:none">
+    <ul class="file-list" id="list7"></ul>
+    <div class="section-status" id="status7">No PDF selected</div>
+  </div>
+
+  <!-- 8. Hidden file input (common pattern — triggered by button) -->
+  <div class="upload-section" id="section8">
+    <h2>8. Hidden Input + Custom Button</h2>
+    <p>File input is hidden; upload triggered by custom button (common web app pattern).</p>
+    <button id="customUploadBtn" style="padding:10px 20px;background:#2ecc71;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px">
+      📎 Attach File
+    </button>
+    <input type="file" id="hiddenFileInput" style="position:absolute;width:0;height:0;opacity:0;overflow:hidden" multiple>
+    <ul class="file-list" id="list8"></ul>
+    <div class="section-status" id="status8">No files attached</div>
+  </div>
+
+  <div id="status">Status: Ready — all upload sections initialized</div>
+
+  <script>
+    function formatSize(bytes) {
+      if (bytes > 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
+      if (bytes > 1024) return (bytes / 1024).toFixed(0) + ' KB';
+      return bytes + ' B';
+    }
+
+    function renderFiles(files, listId, statusId) {
+      const list = document.getElementById(listId);
+      const status = document.getElementById(statusId);
+      list.innerHTML = '';
+      const arr = Array.from(files);
+      arr.forEach(f => {
+        const li = document.createElement('li');
+        const icon = f.type.startsWith('image/') ? '🖼' :
+                     f.type.startsWith('video/') ? '🎥' :
+                     f.type === 'application/pdf' ? '📄' : '📁';
+        li.innerHTML = `${icon} <b>${f.name}</b> — ${formatSize(f.size)} (${f.type || 'unknown'})`;
+        list.appendChild(li);
+      });
+      status.textContent = arr.length > 0
+        ? `${arr.length} file(s): ${arr.map(f => `${f.name} (${f.type}, ${formatSize(f.size)})`).join(', ')}`
+        : 'No files';
+      document.getElementById('status').textContent =
+        `Status: ${arr.length} file(s) uploaded to ${listId} — ${arr.map(f => f.name).join(', ')}`;
+    }
+
+    // 1. Single file
+    document.getElementById('singleFile').addEventListener('change', function() {
+      renderFiles(this.files, 'list1', 'status1');
+    });
+
+    // 2. Image file
+    document.getElementById('imageFile').addEventListener('change', function() {
+      renderFiles(this.files, 'list2', 'status2');
+      const preview = document.getElementById('preview2');
+      preview.innerHTML = '';
+      for (const f of this.files) {
+        if (f.type.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(f);
+          preview.appendChild(img);
+        }
+      }
+    });
+
+    // 3. Video file
+    document.getElementById('videoFile').addEventListener('change', function() {
+      renderFiles(this.files, 'list3', 'status3');
+      const preview = document.getElementById('preview3');
+      preview.innerHTML = '';
+      for (const f of this.files) {
+        if (f.type.startsWith('video/')) {
+          const video = document.createElement('video');
+          video.src = URL.createObjectURL(f);
+          video.controls = true;
+          preview.appendChild(video);
+        }
+      }
+    });
+
+    // 4. Multi-file
+    document.getElementById('multiFile').addEventListener('change', function() {
+      renderFiles(this.files, 'list4', 'status4');
+    });
+
+    // 5. Drop zone
+    const dropZone = document.getElementById('dropZone1');
+    const dropInput = document.getElementById('dropInput1');
+    dropZone.addEventListener('click', () => dropInput.click());
+    dropInput.addEventListener('change', function() {
+      renderFiles(this.files, 'list5', 'status5');
+    });
+    dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      renderFiles(e.dataTransfer.files, 'list5', 'status5');
+    });
+
+    // 6. Editor drop target
+    const editorDrop = document.getElementById('editorDropTarget');
+    editorDrop.addEventListener('dragover', e => e.preventDefault());
+    editorDrop.addEventListener('drop', e => {
+      e.preventDefault();
+      const files = e.dataTransfer.files;
+      renderFiles(files, 'list6', 'status6');
+      // Insert images into editor
+      for (const f of files) {
+        if (f.type.startsWith('image/')) {
+          const img = document.createElement('img');
+          img.src = URL.createObjectURL(f);
+          img.style.maxWidth = '200px';
+          editorDrop.appendChild(img);
+        }
+      }
+    });
+
+    // 7. PDF
+    document.getElementById('pdfFile').addEventListener('change', function() {
+      renderFiles(this.files, 'list7', 'status7');
+    });
+
+    // 8. Hidden input
+    document.getElementById('customUploadBtn').addEventListener('click', () => {
+      document.getElementById('hiddenFileInput').click();
+    });
+    document.getElementById('hiddenFileInput').addEventListener('change', function() {
+      renderFiles(this.files, 'list8', 'status8');
+    });
+  </script>
+</body>
+</html>

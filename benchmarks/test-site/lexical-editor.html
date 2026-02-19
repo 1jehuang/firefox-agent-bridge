@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lexical Editor - Test Site</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; background: #dae0e6; }
+    h1 { color: #1a1a1b; }
+
+    /* Reddit-like post form */
+    .post-form { background: white; border-radius: 4px; padding: 16px; margin: 20px 0; }
+    .form-section { margin-bottom: 16px; }
+    .form-section label { display: block; font-weight: 600; margin-bottom: 6px; color: #1c1c1c; font-size: 12px; text-transform: uppercase; }
+
+    /* Lexical editor styling */
+    .lexical-editor-shell { border: 1px solid #edeff1; border-radius: 4px; overflow: hidden; }
+    .lexical-toolbar {
+      display: flex; gap: 4px; padding: 6px 8px; background: #f6f7f8;
+      border-bottom: 1px solid #edeff1; flex-wrap: wrap;
+    }
+    .lexical-toolbar button {
+      padding: 4px 8px; background: transparent; border: 1px solid transparent;
+      border-radius: 4px; cursor: pointer; font-size: 14px; color: #1c1c1c;
+    }
+    .lexical-toolbar button:hover { background: #e8e8e8; }
+    .lexical-toolbar button.active { background: #d7d7d7; }
+    .lexical-toolbar .separator { width: 1px; background: #edeff1; margin: 0 4px; }
+
+    .lexical-content {
+      min-height: 120px; padding: 12px; outline: none;
+      font-size: 14px; line-height: 1.5; color: #1c1c1c;
+    }
+    .lexical-content:empty::before {
+      content: attr(data-placeholder); color: #878a8c; pointer-events: none;
+    }
+    .lexical-content p { margin: 0 0 8px; }
+
+    /* Tab bar (Text / Link / Image / Video) */
+    .tab-bar { display: flex; border-bottom: 1px solid #edeff1; margin-bottom: 16px; }
+    .tab-bar button {
+      padding: 10px 20px; background: none; border: none; cursor: pointer;
+      font-size: 14px; font-weight: 600; color: #878a8c; border-bottom: 2px solid transparent;
+    }
+    .tab-bar button.active { color: #0079d3; border-bottom-color: #0079d3; }
+
+    /* Submit bar */
+    .submit-bar { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid #edeff1; }
+    .btn { padding: 6px 16px; border-radius: 9999px; font-weight: 600; font-size: 14px; cursor: pointer; }
+    .btn-secondary { background: white; border: 1px solid #0079d3; color: #0079d3; }
+    .btn-primary { background: #0079d3; border: 1px solid #0079d3; color: white; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Flair / tag */
+    .flair-btn { display: inline-block; padding: 4px 8px; border: 1px dashed #878a8c; border-radius: 16px; color: #878a8c; font-size: 12px; cursor: pointer; }
+
+    /* Multiple editors section */
+    .editor-section { margin-bottom: 30px; }
+    .editor-section h2 { color: #1a1a1b; font-size: 16px; }
+
+    /* Community selector */
+    .community-select { padding: 8px 12px; border: 1px solid #edeff1; border-radius: 4px; width: 100%; font-size: 14px; margin-bottom: 12px; }
+
+    #status { margin-top: 20px; padding: 12px; background: white; border-radius: 4px; font-family: monospace; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Lexical Editor Test Page</h1>
+  <p>Simulates Reddit's post creation form using Lexical-like editor structure.</p>
+
+  <!-- Editor 1: Full Reddit post form -->
+  <div class="editor-section">
+    <h2>1. Create Post (Reddit-like)</h2>
+    <div class="post-form" id="postForm1">
+      <select class="community-select" aria-label="Choose a community">
+        <option value="">Choose a community</option>
+        <option value="r/test">r/test</option>
+        <option value="r/programming">r/programming</option>
+        <option value="r/javascript">r/javascript</option>
+      </select>
+
+      <div class="tab-bar">
+        <button class="active" data-tab="text">Text</button>
+        <button data-tab="link">Link</button>
+        <button data-tab="images">Images & Video</button>
+        <button data-tab="poll">Poll</button>
+      </div>
+
+      <!-- Title — uses shadow DOM like Reddit's faceplate-textarea-input -->
+      <div class="form-section">
+        <faceplate-textarea-input name="title" id="titleInput1"></faceplate-textarea-input>
+      </div>
+
+      <!-- Body — Lexical contenteditable -->
+      <div class="form-section">
+        <div class="lexical-editor-shell">
+          <div class="lexical-toolbar">
+            <button title="Bold"><b>B</b></button>
+            <button title="Italic"><i>I</i></button>
+            <button title="Link">🔗</button>
+            <button title="Strikethrough"><s>S</s></button>
+            <button title="Inline Code"><code>&lt;/&gt;</code></button>
+            <div class="separator"></div>
+            <button title="Bulleted List">•</button>
+            <button title="Numbered List">1.</button>
+            <button title="Quote">❝</button>
+            <button title="Code Block">{}</button>
+            <div class="separator"></div>
+            <button title="Image">🖼</button>
+            <button title="Video">🎥</button>
+          </div>
+          <div class="lexical-content"
+               contenteditable="true"
+               role="textbox"
+               aria-label="Post body text field"
+               aria-multiline="true"
+               data-lexical-editor="true"
+               data-placeholder="Body"
+               spellcheck="true">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <span class="flair-btn">+ Add Flair</span>
+      </div>
+
+      <div class="submit-bar">
+        <button class="btn btn-secondary">Save Draft</button>
+        <button class="btn btn-primary" id="postBtn1" disabled>Post</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor 2: Comment reply (simpler, just Lexical body) -->
+  <div class="editor-section">
+    <h2>2. Comment Reply</h2>
+    <div class="post-form" id="commentForm">
+      <div style="padding:12px;background:#f6f7f8;border-radius:4px;margin-bottom:12px;color:#878a8c;font-size:13px">
+        <b style="color:#1c1c1c">u/benchmark_poster</b> · 2h<br>
+        This is the parent comment that you are replying to. It contains some discussion about testing editors.
+      </div>
+      <div class="lexical-editor-shell">
+        <div class="lexical-toolbar">
+          <button title="Bold"><b>B</b></button>
+          <button title="Italic"><i>I</i></button>
+          <button title="Link">🔗</button>
+          <button title="Strikethrough"><s>S</s></button>
+        </div>
+        <div class="lexical-content"
+             contenteditable="true"
+             role="textbox"
+             aria-label="Write a comment"
+             aria-multiline="true"
+             data-lexical-editor="true"
+             data-placeholder="What are your thoughts?"
+             spellcheck="true">
+        </div>
+      </div>
+      <div class="submit-bar">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary" id="commentBtn" disabled>Comment</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editor 3: Pre-filled edit (like editing an existing post) -->
+  <div class="editor-section">
+    <h2>3. Edit Existing Post</h2>
+    <div class="post-form" id="editForm">
+      <div class="form-section">
+        <faceplate-textarea-input name="title" id="titleInput3" data-prefill="Original post title that needs editing"></faceplate-textarea-input>
+      </div>
+      <div class="form-section">
+        <div class="lexical-editor-shell">
+          <div class="lexical-content"
+               contenteditable="true"
+               role="textbox"
+               aria-label="Edit post body"
+               aria-multiline="true"
+               data-lexical-editor="true"
+               data-placeholder="Body"
+               spellcheck="true">This is the original post body content that should be edited or replaced by the agent.</div>
+        </div>
+      </div>
+      <div class="submit-bar">
+        <button class="btn btn-secondary">Cancel</button>
+        <button class="btn btn-primary" id="editBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="status">Status: Ready</div>
+
+  <script>
+    // Create shadow DOM for faceplate-textarea-input (like Reddit's web component)
+    class FaceplateTextareaInput extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' });
+      }
+      connectedCallback() {
+        const prefill = this.getAttribute('data-prefill') || '';
+        this.shadowRoot.innerHTML = `
+          <style>
+            :host { display: block; }
+            textarea {
+              width: 100%; min-height: 38px; padding: 10px 12px;
+              border: 1px solid #edeff1; border-radius: 4px;
+              font-size: 16px; font-weight: 600; font-family: inherit;
+              resize: none; outline: none; box-sizing: border-box;
+              overflow: hidden; line-height: 1.4;
+            }
+            textarea:focus { border-color: #0079d3; }
+            textarea::placeholder { color: #878a8c; font-weight: 400; }
+          </style>
+          <textarea placeholder="Title" rows="1" maxlength="300">${prefill}</textarea>
+        `;
+        const ta = this.shadowRoot.querySelector('textarea');
+        ta.addEventListener('input', () => {
+          ta.style.height = 'auto';
+          ta.style.height = ta.scrollHeight + 'px';
+          this.dispatchEvent(new CustomEvent('input', { detail: { value: ta.value }, bubbles: true }));
+        });
+        if (prefill) {
+          ta.style.height = ta.scrollHeight + 'px';
+        }
+      }
+      get value() {
+        const ta = this.shadowRoot?.querySelector('textarea');
+        return ta ? ta.value : '';
+      }
+    }
+    customElements.define('faceplate-textarea-input', FaceplateTextareaInput);
+
+    // Wire up Lexical editor behavior
+    function setupEditor(editorEl, btnId) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+
+      function update() {
+        const text = editorEl.innerText.trim();
+        btn.disabled = text.length === 0;
+        document.getElementById('status').textContent =
+          `Status: Editor "${editorEl.getAttribute('aria-label')}" — ${text.length} chars`;
+      }
+
+      editorEl.addEventListener('input', update);
+      editorEl.addEventListener('focus', update);
+      update();
+    }
+
+    // Also check title for post form 1
+    const titleInput1 = document.getElementById('titleInput1');
+    const bodyEditor1 = document.querySelector('#postForm1 .lexical-content');
+    const postBtn1 = document.getElementById('postBtn1');
+
+    function updatePostBtn() {
+      const title = titleInput1.value || '';
+      const body = bodyEditor1.innerText.trim();
+      postBtn1.disabled = title.length === 0 && body.length === 0;
+    }
+
+    if (titleInput1) titleInput1.addEventListener('input', updatePostBtn);
+    if (bodyEditor1) bodyEditor1.addEventListener('input', updatePostBtn);
+
+    // Setup comment and edit editors
+    setupEditor(document.querySelector('#commentForm .lexical-content'), 'commentBtn');
+    setupEditor(document.querySelector('#editForm .lexical-content'), 'editBtn');
+
+    // Tab bar switching
+    document.querySelectorAll('.tab-bar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.closest('.tab-bar').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
+    // Submit buttons log but don't navigate
+    document.querySelectorAll('.btn-primary').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        const form = btn.closest('.post-form');
+        const editor = form.querySelector('.lexical-content');
+        const text = editor ? editor.innerText.trim() : '';
+        const title = form.querySelector('faceplate-textarea-input');
+        const titleText = title ? title.value : '';
+        document.getElementById('status').textContent =
+          `Status: ${btn.textContent} submitted — title="${titleText.substring(0, 40)}" body="${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`;
+      });
+    });
+  </script>
+</body>
+</html>

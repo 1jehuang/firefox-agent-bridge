@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas Homework Submission - Test Site</title>
+  <style>
+    body { font-family: 'Lato', system-ui, sans-serif; margin: 0; background: #f5f5f5; }
+
+    /* Canvas-like layout */
+    .canvas-header { background: #394b58; color: white; padding: 12px 24px; font-size: 14px; }
+    .canvas-header a { color: #fff; text-decoration: none; }
+    .canvas-breadcrumb { background: white; border-bottom: 1px solid #c7cdd1; padding: 8px 24px; font-size: 13px; color: #2d3b45; }
+    .canvas-breadcrumb a { color: #0374b5; text-decoration: none; }
+    .canvas-breadcrumb span { color: #6a7883; margin: 0 4px; }
+
+    .canvas-main { max-width: 1000px; margin: 0 auto; padding: 24px; display: flex; gap: 24px; }
+    .canvas-content { flex: 1; }
+    .canvas-sidebar { width: 260px; flex-shrink: 0; }
+
+    /* Assignment details */
+    .assignment-header h1 { font-size: 24px; font-weight: 400; color: #2d3b45; margin: 0 0 16px; }
+    .assignment-meta { font-size: 14px; color: #2d3b45; margin-bottom: 24px; }
+    .assignment-meta .row { display: flex; padding: 6px 0; border-bottom: 1px solid #e8e8e8; }
+    .assignment-meta .label { width: 120px; font-weight: bold; }
+    .assignment-description { padding: 16px; background: white; border: 1px solid #c7cdd1; border-radius: 4px; margin-bottom: 24px; font-size: 14px; line-height: 1.6; }
+    .assignment-description h3 { margin: 0 0 8px; color: #2d3b45; }
+    .assignment-description p { margin: 4px 0; }
+
+    /* Submission area */
+    .submission-area { background: white; border: 1px solid #c7cdd1; border-radius: 4px; padding: 20px; }
+    .submission-area h2 { font-size: 18px; font-weight: 400; color: #2d3b45; margin: 0 0 16px; border-bottom: 1px solid #e8e8e8; padding-bottom: 8px; }
+
+    /* TinyMCE-like editor */
+    .tinymce-shell { border: 1px solid #c7cdd1; border-radius: 4px; margin-bottom: 16px; }
+    .tinymce-menubar {
+      display: flex; gap: 2px; padding: 4px 8px; background: #f5f5f5;
+      border-bottom: 1px solid #e3e3e3; font-size: 13px; color: #2d3b45;
+    }
+    .tinymce-menubar span { padding: 4px 8px; cursor: pointer; border-radius: 3px; }
+    .tinymce-menubar span:hover { background: #dee0e2; }
+    .tinymce-toolbar {
+      display: flex; gap: 2px; padding: 4px 8px; background: #f5f5f5;
+      border-bottom: 1px solid #e3e3e3; flex-wrap: wrap; align-items: center;
+    }
+    .tinymce-toolbar button {
+      padding: 4px 6px; background: transparent; border: 1px solid transparent;
+      border-radius: 3px; cursor: pointer; font-size: 13px; color: #2d3b45; min-width: 28px;
+    }
+    .tinymce-toolbar button:hover { background: #dee0e2; border-color: #c7cdd1; }
+    .tinymce-toolbar .sep { width: 1px; height: 20px; background: #c7cdd1; margin: 0 4px; }
+    .tinymce-toolbar select { font-size: 12px; padding: 2px 4px; border: 1px solid #c7cdd1; border-radius: 3px; }
+
+    /* The iframe-based editor area (simulated) */
+    .tinymce-editor-area {
+      min-height: 200px; position: relative;
+    }
+    .tinymce-editor-area iframe {
+      width: 100%; height: 200px; border: none; display: block;
+    }
+
+    /* Status bar */
+    .tinymce-statusbar {
+      display: flex; justify-content: space-between; padding: 4px 12px;
+      background: #f5f5f5; border-top: 1px solid #e3e3e3; font-size: 12px; color: #6a7883;
+    }
+
+    /* File upload area */
+    .file-upload-area { margin: 16px 0; }
+    .file-upload-area label { display: block; font-weight: bold; margin-bottom: 8px; font-size: 14px; color: #2d3b45; }
+    .file-drop-zone {
+      border: 2px dashed #c7cdd1; border-radius: 8px; padding: 40px;
+      text-align: center; color: #6a7883; cursor: pointer; transition: all 0.2s;
+    }
+    .file-drop-zone:hover, .file-drop-zone.dragover { border-color: #0374b5; background: #f0f8ff; }
+    .file-drop-zone .icon { font-size: 48px; margin-bottom: 12px; }
+    .file-drop-zone p { margin: 4px 0; }
+    .file-drop-zone .browse-link { color: #0374b5; text-decoration: underline; cursor: pointer; }
+
+    .file-list { list-style: none; padding: 0; margin: 12px 0; }
+    .file-list li {
+      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      background: #f6f7f8; border: 1px solid #e3e3e3; border-radius: 4px; margin: 4px 0; font-size: 13px;
+    }
+    .file-list .file-icon { font-size: 20px; }
+    .file-list .file-info { flex: 1; }
+    .file-list .file-name { font-weight: bold; }
+    .file-list .file-size { color: #6a7883; font-size: 12px; }
+    .file-list .file-remove { color: #c0392b; cursor: pointer; padding: 4px; }
+
+    /* Switch to HTML editor link */
+    .editor-switch { display: block; margin: 8px 0; font-size: 13px; }
+    .editor-switch a { color: #0374b5; cursor: pointer; text-decoration: none; }
+    .editor-switch a:hover { text-decoration: underline; }
+
+    /* Submit button */
+    .submit-btn {
+      background: #0374b5; color: white; border: none; border-radius: 4px;
+      padding: 10px 24px; font-size: 16px; cursor: pointer; margin-top: 16px;
+    }
+    .submit-btn:hover { background: #025e93; }
+    .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Sidebar */
+    .sidebar-box { background: white; border: 1px solid #c7cdd1; border-radius: 4px; padding: 16px; margin-bottom: 16px; }
+    .sidebar-box h3 { font-size: 14px; font-weight: bold; color: #2d3b45; margin: 0 0 8px; }
+    .sidebar-box p { font-size: 13px; color: #6a7883; margin: 4px 0; }
+
+    #status { margin: 20px 24px; padding: 12px; background: white; border: 1px solid #c7cdd1; border-radius: 4px; font-family: monospace; font-size: 13px; }
+
+    /* Hidden file inputs */
+    .hidden-file-input { position: absolute; width: 0; height: 0; opacity: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <!-- Canvas header -->
+  <div class="canvas-header">
+    <a href="#">CHIN 112 A Wi 26: First-Year Chinese For Heritage Learners</a>
+  </div>
+  <div class="canvas-breadcrumb">
+    <a href="#">CHIN 112 A</a> <span>›</span>
+    <a href="#">Assignments</a> <span>›</span>
+    <span>L12-Homework-1</span>
+  </div>
+
+  <div class="canvas-main">
+    <div class="canvas-content">
+      <!-- Assignment header -->
+      <div class="assignment-header">
+        <h1>L12-Homework-1</h1>
+      </div>
+
+      <div class="assignment-meta">
+        <div class="row"><span class="label">Due</span><span>Feb 12, 2026 at 7:00am</span></div>
+        <div class="row"><span class="label">Points</span><span>10</span></div>
+        <div class="row"><span class="label">Submitting</span><span>a text entry box</span></div>
+        <div class="row"><span class="label">Attempts</span><span>Unlimited</span></div>
+      </div>
+
+      <!-- Assignment description (Chinese homework instructions) -->
+      <div class="assignment-description">
+        <h3>Homework Instructions</h3>
+        <p>Complete the following exercises from the textbook:</p>
+        <p><b>一、填空 (Fill in the blanks):</b> Use the vocabulary from Lesson 12 to complete sentences 1-5 on page 130.</p>
+        <p><b>二、造句 (Make sentences):</b> Write 3 sentences using: 适应, 矛盾, 背景</p>
+        <p><b>三、翻译 (Translation):</b> Translate the paragraph on page 131 into Chinese.</p>
+        <p><em>You may type your answers below or upload a photo/scan of handwritten work.</em></p>
+      </div>
+
+      <!-- Submission area -->
+      <div class="submission-area">
+        <h2>Submit Assignment</h2>
+
+        <!-- TinyMCE-like rich text editor -->
+        <div class="tinymce-shell" id="tinymceEditor">
+          <div class="tinymce-menubar">
+            <span>Edit</span>
+            <span>View</span>
+            <span>Insert</span>
+            <span>Format</span>
+            <span>Tools</span>
+            <span>Table</span>
+          </div>
+          <div class="tinymce-toolbar">
+            <select title="Font size"><option>12pt</option><option>14pt</option><option>18pt</option><option>24pt</option></select>
+            <select title="Paragraph"><option>Paragraph</option><option>Heading 1</option><option>Heading 2</option></select>
+            <div class="sep"></div>
+            <button title="Bold"><b>B</b></button>
+            <button title="Italic"><i>I</i></button>
+            <button title="Underline"><u>U</u></button>
+            <button title="Strikethrough"><s>S</s></button>
+            <div class="sep"></div>
+            <button title="Text color">A▼</button>
+            <button title="Background color">🎨</button>
+            <div class="sep"></div>
+            <button title="Align left">≡</button>
+            <button title="Center">≡</button>
+            <button title="Align right">≡</button>
+            <div class="sep"></div>
+            <button title="Bulleted list">•</button>
+            <button title="Numbered list">1.</button>
+            <button title="Indent">→</button>
+            <button title="Outdent">←</button>
+            <div class="sep"></div>
+            <button title="Link">🔗</button>
+            <button title="Image" id="insertImageBtn">🖼</button>
+            <button title="Media">🎬</button>
+            <button title="Table">⊞</button>
+            <div class="sep"></div>
+            <button title="Undo">↩</button>
+            <button title="Redo">↪</button>
+          </div>
+          <div class="tinymce-editor-area">
+            <iframe id="textentry_text_ifr"
+                    title="Rich Text Area"
+                    class="tox-edit-area__iframe"
+                    srcdoc='<!DOCTYPE html><html><head><style>body{font-family:system-ui,sans-serif;font-size:14px;color:#2d3b45;padding:12px;margin:0;min-height:180px;line-height:1.6;}body:empty::before{content:attr(data-placeholder);color:#999;}p{margin:0 0 8px;}</style></head><body contenteditable="true" data-placeholder="Type your homework answers here..."></body></html>'>
+            </iframe>
+          </div>
+          <div class="tinymce-statusbar">
+            <span class="editor-switch"><a href="#" id="switchEditorLink">Switch to the html editor</a></span>
+            <span id="wordCount">0 words</span>
+          </div>
+        </div>
+
+        <!-- File upload area -->
+        <div class="file-upload-area">
+          <label>Attach Files</label>
+          <div class="file-drop-zone" id="dropZone">
+            <div class="icon">📎</div>
+            <p>Drag and drop files here</p>
+            <p>or <span class="browse-link" id="browseLink">browse files</span></p>
+            <p style="font-size:11px;color:#999">Accepts: images, PDF, videos (max 500MB)</p>
+          </div>
+          <input type="file" id="fileInput"
+                 class="hidden-file-input"
+                 multiple
+                 accept="image/*,video/*,.pdf,.doc,.docx,.txt,.tex,.zip">
+          <ul class="file-list" id="fileList"></ul>
+        </div>
+
+        <!-- Second file input: specifically for image upload (like Canvas image insert) -->
+        <input type="file" id="imageInput"
+               class="hidden-file-input"
+               accept="image/png,image/jpeg,image/gif,image/webp">
+
+        <button class="submit-btn" id="submitBtn">Submit Assignment</button>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="canvas-sidebar">
+      <div class="sidebar-box">
+        <h3>Submission Details</h3>
+        <p><b>Attempt:</b> In Progress</p>
+        <p><b>Status:</b> Not Submitted</p>
+        <p>Unlimited Attempts Allowed</p>
+      </div>
+      <div class="sidebar-box">
+        <h3>Comments</h3>
+        <textarea placeholder="Add a comment..." rows="3" style="width:100%;border:1px solid #c7cdd1;border-radius:4px;padding:8px;font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div id="status">Status: Ready</div>
+
+  <script>
+    // === TinyMCE iframe editor setup ===
+    const editorIframe = document.getElementById('textentry_text_ifr');
+    let editorBody = null;
+
+    editorIframe.addEventListener('load', () => {
+      editorBody = editorIframe.contentDocument.body;
+
+      editorBody.addEventListener('input', updateWordCount);
+      editorBody.addEventListener('focus', updateWordCount);
+      updateSubmitState();
+
+      // Expose for testing
+      window._editorBody = editorBody;
+    });
+
+    function getEditorText() {
+      if (!editorBody) return '';
+      return editorBody.innerText.trim();
+    }
+
+    function updateWordCount() {
+      const text = getEditorText();
+      const words = text ? text.split(/\s+/).filter(w => w.length > 0).length : 0;
+      document.getElementById('wordCount').textContent = `${words} word${words !== 1 ? 's' : ''}`;
+      updateSubmitState();
+    }
+
+    // === File Upload handling ===
+    const fileInput = document.getElementById('fileInput');
+    const imageInput = document.getElementById('imageInput');
+    const dropZone = document.getElementById('dropZone');
+    const fileList = document.getElementById('fileList');
+    const browseLink = document.getElementById('browseLink');
+    let uploadedFiles = [];
+
+    browseLink.addEventListener('click', () => fileInput.click());
+
+    document.getElementById('insertImageBtn').addEventListener('click', () => {
+      imageInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    imageInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+      // Also insert into editor
+      if (editorBody && e.target.files.length > 0) {
+        for (const file of e.target.files) {
+          if (file.type.startsWith('image/')) {
+            const url = URL.createObjectURL(file);
+            const img = editorBody.ownerDocument.createElement('img');
+            img.src = url;
+            img.alt = file.name;
+            img.style.maxWidth = '100%';
+            editorBody.appendChild(img);
+          }
+        }
+        updateWordCount();
+      }
+    });
+
+    // Drag and drop
+    dropZone.addEventListener('dragenter', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    function handleFiles(files) {
+      for (const file of files) {
+        uploadedFiles.push(file);
+        renderFileList();
+      }
+      updateSubmitState();
+      document.getElementById('status').textContent =
+        `Status: ${uploadedFiles.length} file(s) attached — ${uploadedFiles.map(f => f.name).join(', ')}`;
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = '';
+      uploadedFiles.forEach((file, idx) => {
+        const li = document.createElement('li');
+        const icon = file.type.startsWith('image/') ? '🖼' :
+                     file.type.startsWith('video/') ? '🎥' :
+                     file.type === 'application/pdf' ? '📄' : '📁';
+        const size = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + ' MB' :
+                     file.size > 1024 ? (file.size / 1024).toFixed(0) + ' KB' :
+                     file.size + ' B';
+        li.innerHTML = `
+          <span class="file-icon">${icon}</span>
+          <span class="file-info">
+            <span class="file-name">${file.name}</span><br>
+            <span class="file-size">${size} · ${file.type || 'unknown'}</span>
+          </span>
+          <span class="file-remove" data-idx="${idx}" title="Remove">✕</span>
+        `;
+        li.querySelector('.file-remove').addEventListener('click', () => {
+          uploadedFiles.splice(idx, 1);
+          renderFileList();
+          updateSubmitState();
+        });
+        fileList.appendChild(li);
+      });
+    }
+
+    // === Submit ===
+    function updateSubmitState() {
+      const hasText = getEditorText().length > 0;
+      const hasFiles = uploadedFiles.length > 0;
+      document.getElementById('submitBtn').disabled = !hasText && !hasFiles;
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', () => {
+      const text = getEditorText();
+      const files = uploadedFiles.map(f => f.name);
+      document.getElementById('status').textContent =
+        `Status: SUBMITTED — text="${text.substring(0, 80)}${text.length > 80 ? '...' : ''}" files=[${files.join(', ')}]`;
+    });
+
+    // HTML editor toggle
+    let htmlMode = false;
+    document.getElementById('switchEditorLink').addEventListener('click', (e) => {
+      e.preventDefault();
+      htmlMode = !htmlMode;
+      if (htmlMode) {
+        const html = editorBody.innerHTML;
+        editorBody.innerText = html;
+        editorBody.setAttribute('data-html-mode', 'true');
+        e.target.textContent = 'Switch to the visual editor';
+      } else {
+        const html = editorBody.innerText;
+        editorBody.innerHTML = html;
+        editorBody.removeAttribute('data-html-mode');
+        e.target.textContent = 'Switch to the html editor';
+      }
+    });
+  </script>
+</body>
+</html>
