@@ -301,7 +301,86 @@ browser parallel '{
 
 ## Authentication (Autonomous Login)
 
-The bridge integrates with a Bitwarden vault (via bronzewarden) for fully autonomous credential fill. No human interaction needed.
+The bridge integrates with a Bitwarden vault (via [bronzewarden](https://github.com/1jehuang/bronzewarden)) for fully autonomous credential fill. No human interaction needed.
+
+### Initial Setup
+
+**1. Install bronzewarden** (local Bitwarden vault client):
+
+```bash
+cd ~/projects/bronzewarden   # or wherever you cloned it
+cargo install --path .
+```
+
+**2. Log in to Bitwarden:**
+
+```bash
+# With email + master password
+bronzewarden login -e you@example.com
+
+# Or with API key (if password login is challenged by 2FA/captcha)
+# Get your API key from: Bitwarden Web Vault → Settings → Security → Keys → API Key
+export BW_CLIENTID="user.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+export BW_CLIENTSECRET="your_client_secret"
+bronzewarden login --apikey
+```
+
+**3. Sync the vault:**
+
+```bash
+bronzewarden sync
+```
+
+This downloads and caches your encrypted vault locally at `~/.config/bronzewarden/vault.json`.
+
+**4. Set up passwordless unlock** (so the native host can unlock the vault automatically):
+
+```bash
+bronzewarden setup-fingerprint
+```
+
+This prompts for your master password one last time, derives the decryption key, and stores it in `~/.config/bronzewarden/protected_key.json`. After this, the native host unlocks the vault at startup without any password prompt.
+
+**Alternative: password file unlock** (if you don't want to use setup-fingerprint):
+
+```bash
+# Store master password in a file (permissions should be 0600)
+echo "your_master_password" > ~/.config/bronzewarden/master_password
+chmod 600 ~/.config/bronzewarden/master_password
+export BW_PASSWORD_FILE=~/.config/bronzewarden/master_password
+```
+
+Add the `BW_PASSWORD_FILE` export to `native-host-wrapper.sh` so it's available when Firefox launches the host.
+
+**5. Set up API key for vault sync** (needed for `browser vaultSync`):
+
+```bash
+# Store your Bitwarden API credentials
+echo "user.xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" > ~/.config/bronzewarden/client_id
+echo "your_client_secret" > ~/.config/bronzewarden/client_secret
+chmod 600 ~/.config/bronzewarden/client_id ~/.config/bronzewarden/client_secret
+```
+
+Or set environment variables `BW_CLIENT_ID` and `BW_CLIENT_SECRET` in `native-host-wrapper.sh`.
+
+**6. Verify it works:**
+
+```bash
+browser ping                    # Check bridge connection
+browser vaultStatus '{}'        # Should show: {"locked": false, "loginEntries": N}
+```
+
+### Fingerprint Verification (Optional Security)
+
+By default, `autoLogin` requires fingerprint verification before filling credentials. This is controlled by:
+
+```bash
+# In native-host-wrapper.sh:
+export FAB_AUTOLOGIN_REQUIRE_FINGERPRINT=true   # Require fingerprint touch (default)
+export FAB_AUTOLOGIN_REQUIRE_FINGERPRINT=false   # No fingerprint needed (fully autonomous)
+```
+
+When enabled, a desktop notification prompts you to touch the fingerprint sensor before credentials are filled. Requires `fprintd` to be installed and a fingerprint enrolled.
 
 ### Auto-Login Flow
 
@@ -322,17 +401,19 @@ browser autoLogin '{"domain": "github.com", "submit": true}'
 ```bash
 # Check vault status
 browser vaultStatus '{}'
-# Returns: {"locked": false, "entries": 322}
+# Returns: {"locked": false, "loginEntries": 322}
 
 # Re-sync vault from server (if credentials were updated)
 browser vaultSync '{}'
-# Returns: {"synced": true, "entries": 322}
+# Returns: {"synced": true, "loginEntries": 322}
 ```
 
 ### How It Works
 - Credentials are stored in Bitwarden and decrypted locally by the native host
 - The `autoLogin` action sends credentials directly to the extension via the native messaging channel (never over WebSocket)
-- Vault is auto-unlocked at host startup using a master password from the system keyring
+- Vault is auto-unlocked at host startup using a protected key (from `setup-fingerprint`) or a password file (`BW_PASSWORD_FILE`)
+- Credential lookup priority: `BW_PASSWORD` env var → `BW_PASSWORD_FILE` → protected key → gnome-keyring (deprecated)
+- API credential lookup priority: `BW_CLIENT_ID`/`BW_CLIENT_SECRET` env vars → `~/.config/bronzewarden/client_id`/`client_secret` files
 
 ### Legacy Auth Detection
 
