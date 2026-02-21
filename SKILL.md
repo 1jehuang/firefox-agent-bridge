@@ -205,7 +205,18 @@ $4.99
 
 This shows **what's clickable** and **where it is in context**.
 
-### 4. Interact Using Selectors
+### 4. Handle Login Pages
+
+If you land on a login page or get redirected to one, use `autoLogin` to fill credentials automatically from the Bitwarden vault:
+
+```bash
+# Auto-fill credentials and submit the login form
+browser autoLogin '{"domain": "github.com", "submit": true}'
+```
+
+This looks up the domain in the vault, fills the username/password, and optionally submits. You don't need to find or interact with form fields manually. After login, use `getContent` to verify you're logged in.
+
+### 5. Interact Using Selectors
 
 ```bash
 # Click using selector from annotated output
@@ -520,14 +531,15 @@ This lets multiple agents work in parallel without stepping on each other.
 
 1. **Start with `listTabs`** to see what's open
 2. **Use `newSession`** for a clean start
-3. **Use `tabId`** for parallel/isolated execution
-4. **Use `annotated` format** - shows content + clickable elements together
-5. **Use selectors from annotated output** - more reliable than text matching
-6. **Fork when uncertain** - try multiple paths, kill the wrong ones
-7. **Never use `sleep` commands** - browser commands are synchronous and wait for completion. Use `waitFor` action if you need to wait for specific elements or text to appear
-8. **Use `uploadFile` for file inputs** - reads local files and uploads automatically
-9. **Use `dropFile` for drop zones** - simulates native drag-and-drop
-10. **Use `evaluate` for custom JS** - with `pageWorld: true` for page-context access
+3. **Use `autoLogin` when you hit a login page** - don't try to fill login forms manually, just `browser autoLogin '{"domain": "example.com", "submit": true}'`
+4. **Use `tabId`** for parallel/isolated execution
+5. **Use `annotated` format** - shows content + clickable elements together
+6. **Use selectors from annotated output** - more reliable than text matching
+7. **Fork when uncertain** - try multiple paths, kill the wrong ones
+8. **Never use `sleep` commands** - browser commands are synchronous and wait for completion. Use `waitFor` action if you need to wait for specific elements or text to appear
+9. **Use `uploadFile` for file inputs** - reads local files and uploads automatically
+10. **Use `dropFile` for drop zones** - simulates native drag-and-drop
+11. **Use `evaluate` for custom JS** - with `pageWorld: true` for page-context access
 
 ## Troubleshooting
 
