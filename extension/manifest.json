@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Browser Agent Bridge",
-  "version": "0.9.1",
+  "version": "0.9.3",
   "description": "Bridge AI agent commands to the active browser tab via native messaging.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -18,12 +18,18 @@
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -41,7 +47,9 @@
       "id": "browser-agent-bridge@1jehuang.github.io",
       "strict_min_version": "91.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
   }
