@@ -110,6 +110,15 @@ async fn main() -> Result<()> {
             Some("zip") => "application/zip",
             Some("doc") => "application/msword",
             Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("mp4") => "video/mp4",
+            Some("mov") => "video/quicktime",
+            Some("webm") => "video/webm",
+            Some("webp") => "image/webp",
+            Some("svg") => "image/svg+xml",
+            Some("mp3") => "audio/mpeg",
+            Some("wav") => "audio/wav",
+            Some("ogg") => "audio/ogg",
+            Some("csv") => "text/csv",
             _ => "application/octet-stream",
         };
 
@@ -156,6 +165,15 @@ async fn main() -> Result<()> {
             Some("tex") => "application/x-tex",
             Some("doc") => "application/msword",
             Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("mp4") => "video/mp4",
+            Some("mov") => "video/quicktime",
+            Some("webm") => "video/webm",
+            Some("webp") => "image/webp",
+            Some("svg") => "image/svg+xml",
+            Some("mp3") => "audio/mpeg",
+            Some("wav") => "audio/wav",
+            Some("ogg") => "audio/ogg",
+            Some("csv") => "text/csv",
             _ => "application/octet-stream",
         };
 
