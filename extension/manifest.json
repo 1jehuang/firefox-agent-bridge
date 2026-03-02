@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Browser Agent Bridge",
-  "version": "0.9.3",
+  "version": "0.9.6",
   "description": "Bridge AI agent commands to the active browser tab via native messaging.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -15,6 +15,7 @@
     "nativeMessaging",
     "notifications",
     "storage",
+    "webNavigation",
     "<all_urls>"
   ],
   "background": {

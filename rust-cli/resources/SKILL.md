@@ -74,6 +74,35 @@ browser <action> '<json_params>'
 | `tryUntil` | Try alternatives until one succeeds | `alternatives[]`, `timeout` |
 | `parallel` | Run commands on multiple URLs | `branches[]` with url + commands |
 
+### Cross-Origin Iframe Support
+
+Many login pages (Apple, Google, Microsoft) embed their sign-in forms inside cross-origin iframes. Standard `click`/`type`/`getContent` only target the main frame by default. Use these to work inside iframes:
+
+| Action | Description | Key Params |
+|--------|-------------|------------|
+| `listFrames` | List all frames in current tab with their URLs, inputs, and clickable elements | - |
+| Any action | Target a specific frame | Add `"frameId": N` to params |
+| Any action | Try all frames | Add `"allFrames": true` to params |
+
+**Workflow for login iframes (Apple, Google, etc.):**
+
+```bash
+# 1. Discover frames and find the one with the login form
+browser listFrames '{}'
+# Returns frames with frameId, url, inputs[], clickables[]
+
+# 2. Get content from the login iframe specifically
+browser getContent '{"frameId": 3, "format": "annotated"}'
+
+# 3. Click/type inside the iframe
+browser click '{"selector": "#account_name_text_field", "frameId": 3}'
+browser type '{"selector": "#account_name_text_field", "text": "user@example.com", "frameId": 3}'
+
+# Alternative: let the bridge try all frames automatically
+browser click '{"selector": "#account_name_text_field", "allFrames": true}'
+browser type '{"selector": "#account_name_text_field", "text": "user@example.com", "allFrames": true}'
+```
+
 ### Authentication & Vault
 
 | Action | Description | Key Params |

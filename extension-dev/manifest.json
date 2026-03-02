@@ -8,6 +8,7 @@
     "activeTab",
     "nativeMessaging",
     "notifications",
+    "webNavigation",
     "<all_urls>"
   ],
   "background": {

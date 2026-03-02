@@ -325,6 +325,10 @@ async function dispatchAction(action, params, profile) {
       setTimeout(() => browser.runtime.reload(), 100);
       return { reloading: true, message: "Extension will reload in 100ms" };
 
+    // Frame discovery (for cross-origin iframes like Apple sign-in)
+    case "listFrames":
+      return listFrames(params);
+
     // Session/Tab Management
     case "listTabs":
       return listAllTabs();
@@ -384,8 +388,13 @@ async function dispatchAction(action, params, profile) {
       return requestAuth(params);
 
     // Secure credential fill (only from native host, never from WS client)
-    case "secureAutoFill":
-      return sendToContent("secureAutoFill", params, profile);
+    // Try all frames — login forms are often in cross-origin iframes (e.g., Apple ID)
+    case "secureAutoFill": {
+      const tabId = await resolveTabId(params || {});
+      const message = { type: "agent-bridge", action: "secureAutoFill", params: params || {} };
+      if (profile) message.profile = true;
+      return sendToContentFirstSuccess(tabId, message, (r) => r && (r.username || r.password));
+    }
 
     // JavaScript evaluation
     case "evaluate":
@@ -706,6 +715,47 @@ async function getActiveTabInfo() {
 }
 
 // List all open tabs across all windows
+async function listFrames(params) {
+  const tabId = await resolveTabId(params || {});
+  const frames = await browser.webNavigation.getAllFrames({ tabId });
+  if (!frames || frames.length === 0) {
+    return { frames: [], tabId };
+  }
+
+  const results = [];
+  for (const frame of frames) {
+    const info = {
+      frameId: frame.frameId,
+      parentFrameId: frame.parentFrameId,
+      url: frame.url,
+    };
+
+    // Try to get content summary from each frame
+    try {
+      const message = { type: "agent-bridge", action: "getInteractables", params: {} };
+      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      if (result) {
+        info.title = result.title || null;
+        const elements = result.elements || [];
+        info.interactableCount = elements.length;
+        info.inputs = elements.filter(e => e.type === 'input').map(e => ({
+          name: e.name || e.label,
+          inputType: e.inputType,
+          selector: e.selector
+        }));
+        info.clickables = elements.filter(e => e.type === 'clickable').map(e => e.text).slice(0, 10);
+        info.hasContent = true;
+      }
+    } catch (e) {
+      info.hasContent = false;
+    }
+
+    results.push(info);
+  }
+
+  return { frames: results, tabId };
+}
+
 async function listAllTabs() {
   const tabs = await browser.tabs.query({});
   const windows = await browser.windows.getAll();
@@ -992,9 +1042,63 @@ async function sendToContent(action, params, profile) {
   const tabId = await resolveTabId(params || {});
   const message = { type: "agent-bridge", action, params: params || {} };
   if (profile) message.profile = true;
+  // Support allFrames param to try all frames (needed for cross-origin iframes like Apple sign-in)
+  if (params && params.allFrames) {
+    return sendToContentAllFrames(tabId, message);
+  }
   // Default to main frame (frameId: 0) to avoid responding from iframes like Stripe trackers
   const frameId = (params && Number.isInteger(params.frameId)) ? params.frameId : 0;
   return browser.tabs.sendMessage(tabId, message, { frameId });
+}
+
+async function sendToContentAllFrames(tabId, message) {
+  const frames = await browser.webNavigation.getAllFrames({ tabId });
+  if (!frames || frames.length === 0) {
+    return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+  }
+  const results = [];
+  for (const frame of frames) {
+    try {
+      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      if (result && typeof result === "object") {
+        result.__frameId = frame.frameId;
+        result.__frameUrl = frame.url;
+      }
+      results.push(result);
+    } catch (e) {
+      // Frame may not have content script injected (e.g., about:blank) — skip
+    }
+  }
+  if (results.length === 0) {
+    throw new Error("No frames responded to " + message.action);
+  }
+  if (results.length === 1) return results[0];
+  return results;
+}
+
+async function sendToContentFirstSuccess(tabId, message, successTest) {
+  const frames = await browser.webNavigation.getAllFrames({ tabId });
+  if (!frames || frames.length === 0) {
+    return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+  }
+  // Try main frame first (frameId 0), then subframes
+  const sorted = frames.slice().sort((a, b) => a.frameId - b.frameId);
+  for (const frame of sorted) {
+    try {
+      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      if (successTest(result)) {
+        if (result && typeof result === "object") {
+          result.__frameId = frame.frameId;
+          result.__frameUrl = frame.url;
+        }
+        return result;
+      }
+    } catch (e) {
+      // Skip frames that don't respond
+    }
+  }
+  // If no frame succeeded, try main frame as fallback
+  return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
 }
 
 async function captureScreenshot(params) {
