@@ -14,6 +14,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Session state for a WebSocket client connection.
+/// Each connection gets its own session with an isolated active tab.
+struct ClientSession {
+    id: String,
+    active_tab_id: Option<i64>,
+    forks: HashMap<String, i64>, // fork_name -> tabId
+}
+
 use bronzewarden::api::{BitwardenApi, SyncResponse};
 use bronzewarden::config::Config as BwConfig;
 use bronzewarden::crypto::{EncString, MasterKey};
@@ -690,6 +698,17 @@ async fn process_auto_login(
     }))
 }
 
+/// Actions that need an active tab to operate on
+fn action_needs_tab(action: &str) -> bool {
+    matches!(
+        action,
+        "navigate" | "click" | "type" | "fillForm" | "getContent"
+            | "getInteractables" | "preexplore" | "screenshot" | "scroll"
+            | "evaluate" | "waitFor" | "tryUntil" | "uploadFile" | "dropFile"
+            | "getAuthContext" | "requestAuth" | "secureAutoFill" | "listFrames"
+    )
+}
+
 /// Handle a WebSocket client connection
 async fn handle_ws_client(
     stream: tokio::net::TcpStream,
@@ -697,6 +716,14 @@ async fn handle_ws_client(
     pending: PendingMap,
     vault: SharedVault,
 ) {
+    let session_id = next_id().replace("req_", "sess_");
+    let mut session = ClientSession {
+        id: session_id.clone(),
+        active_tab_id: None,
+        forks: HashMap::new(),
+    };
+    log!("Session {} connected", session.id);
+
     let ws_config = WebSocketConfig {
         max_message_size: Some(128 * 1024 * 1024),
         max_frame_size: Some(64 * 1024 * 1024),
@@ -712,11 +739,12 @@ async fn handle_ws_client(
 
     let (mut write, mut read) = ws_stream.split();
 
-    // Send ready message
+    // Send ready message with session ID
     let ready_msg = json!({
         "type": "ready",
         "host": ws_host(),
-        "port": ws_port()
+        "port": ws_port(),
+        "sessionId": session.id
     });
     if let Err(e) = write.send(Message::Text(ready_msg.to_string())).await {
         log!("Failed to send ready message: {}", e);
@@ -727,14 +755,13 @@ async fn handle_ws_client(
         let msg = match msg {
             Ok(Message::Text(text)) => text,
             Ok(Message::Close(_)) => break,
-            Ok(_) => continue, // Ignore ping, pong, binary
+            Ok(_) => continue,
             Err(e) => {
                 log!("WebSocket read error: {}", e);
                 break;
             }
         };
 
-        // Parse the incoming message
         let mut message: Value = match serde_json::from_str(&msg) {
             Ok(m) => m,
             Err(_) => {
@@ -744,14 +771,26 @@ async fn handle_ws_client(
             }
         };
 
-        // Check for action
+        // Handle session control messages
+        if let Some(msg_type) = message.get("type").and_then(|v| v.as_str()) {
+            if msg_type == "session_info" {
+                let info = json!({
+                    "type": "session_info",
+                    "sessionId": session.id,
+                    "activeTabId": session.active_tab_id,
+                    "forks": session.forks.keys().collect::<Vec<_>>()
+                });
+                let _ = write.send(Message::Text(info.to_string())).await;
+                continue;
+            }
+        }
+
         if message.get("action").is_none() {
             let error_msg = json!({"ok": false, "error": "Missing action"});
             let _ = write.send(Message::Text(error_msg.to_string())).await;
             continue;
         }
 
-        // Generate ID if not provided
         let id = match message.get("id").and_then(|v| v.as_str()) {
             Some(id) => id.to_string(),
             None => {
@@ -761,7 +800,35 @@ async fn handle_ws_client(
             }
         };
 
-        // Check for profiling flag
+        let action = message.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        // Session-scoped tab injection: if the message doesn't have an explicit
+        // tabId and the action needs a tab, inject the session's active tab.
+        if action_needs_tab(&action) {
+            let has_explicit_tab = message.get("params")
+                .and_then(|p| p.get("tabId"))
+                .and_then(|v| v.as_i64())
+                .is_some();
+            if !has_explicit_tab {
+                if let Some(tab_id) = session.active_tab_id {
+                    if let Some(params) = message.get_mut("params") {
+                        params["tabId"] = json!(tab_id);
+                    } else {
+                        message["params"] = json!({"tabId": tab_id});
+                    }
+                }
+            }
+        }
+
+        // Session-scoped fork resolution: resolve fork names within this session
+        if let Some(fork_name) = message.get("params").and_then(|p| p.get("fork")).and_then(|v| v.as_str()).map(|s| s.to_string()) {
+            if let Some(&tab_id) = session.forks.get(&fork_name) {
+                if let Some(params) = message.get_mut("params") {
+                    params["tabId"] = json!(tab_id);
+                }
+            }
+        }
+
         let profile = message.get("profile").and_then(|v| v.as_bool()).unwrap_or(false)
             || message.get("params")
                 .and_then(|p| p.get("profile"))
@@ -928,12 +995,46 @@ async fn handle_ws_client(
             }
         };
 
+        // Update session state from responses
+        let resp_ok = response.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+        if resp_ok {
+            if let Some(result) = response.get("result") {
+                // Track tabId from navigate, newSession, setActiveTab responses
+                if matches!(action.as_str(), "navigate" | "newSession" | "setActiveTab") {
+                    if let Some(tab_id) = result.get("tabId").and_then(|v| v.as_i64()) {
+                        session.active_tab_id = Some(tab_id);
+                    }
+                }
+                // Track forks created by this session
+                if action == "fork" {
+                    if let Some(forks) = result.get("forks").and_then(|v| v.as_array()) {
+                        for fork in forks {
+                            if let (Some(name), Some(tab_id)) = (
+                                fork.get("name").and_then(|v| v.as_str()),
+                                fork.get("tabId").and_then(|v| v.as_i64()),
+                            ) {
+                                session.forks.insert(name.to_string(), tab_id);
+                            }
+                        }
+                    }
+                }
+                // Track fork deletion
+                if action == "killFork" {
+                    if let Some(killed) = result.get("fork").and_then(|v| v.as_str()) {
+                        session.forks.remove(killed);
+                    }
+                }
+            }
+        }
+
         // Send response back to client
         if let Err(e) = write.send(Message::Text(response.to_string())).await {
             log!("Failed to send response: {}", e);
             break;
         }
     }
+
+    log!("Session {} disconnected (tab: {:?})", session.id, session.active_tab_id);
 }
 
 /// Read native messaging input from stdin (blocking, runs in separate thread)

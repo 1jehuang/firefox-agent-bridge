@@ -52,6 +52,12 @@ pub enum Command {
         timeout: u64,
     },
 
+    /// Manage persistent browser sessions for multi-agent isolation
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
     /// Load extension from source for development (auto-reload on changes)
     Dev {
         /// Path to extension source directory
@@ -66,4 +72,24 @@ pub enum Command {
         #[arg(short, long)]
         watch: bool,
     },
+}
+
+#[derive(Subcommand)]
+pub enum SessionAction {
+    /// Start a new persistent session (holds a WebSocket connection)
+    Start {
+        /// Session name (used to identify the session socket)
+        #[arg(default_value = "default")]
+        name: String,
+    },
+
+    /// Stop a running session
+    Stop {
+        /// Session name to stop
+        #[arg(default_value = "default")]
+        name: String,
+    },
+
+    /// List active sessions
+    List,
 }

@@ -10,8 +10,8 @@ use anyhow::Result;
 use base64::Engine;
 use clap::Parser;
 
-use cli::{Cli, Command};
-use commands::{dev, docs, screenshot, setup, start};
+use cli::{Cli, Command, SessionAction};
+use commands::{dev, docs, screenshot, session, setup, start};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -26,6 +26,11 @@ async fn main() -> Result<()> {
             }
             Command::Setup { target } => setup::run(&target),
             Command::Start { url, timeout } => start::run(url.as_deref(), timeout).await,
+            Command::Session { action } => match action {
+                SessionAction::Start { name } => session::run(&name).await,
+                SessionAction::Stop { name } => session::stop(&name).await,
+                SessionAction::List => session::list(),
+            },
             Command::Dev { source_dir, port, watch } => {
                 dev::run(source_dir.as_deref(), port, watch).await
             }
@@ -77,6 +82,35 @@ async fn main() -> Result<()> {
         })?,
         None => serde_json::json!({}),
     };
+
+    // Check if a session daemon is available (via BROWSER_SESSION env var)
+    if let Ok(session_name) = std::env::var("BROWSER_SESSION") {
+        if session::is_session_running(&session_name) {
+            // Route through the session daemon for tab isolation
+            let response = session::send_via_session(&session_name, &action, params.clone()).await?;
+
+            // Handle response the same way as direct mode
+            let ok = response.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            if !ok {
+                let error = response.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                eprintln!("Error: {}", error);
+                std::process::exit(1);
+            }
+
+            if let Some(result) = response.get("result") {
+                // Screenshot handling
+                if action == "screenshot" {
+                    if let Ok(screenshot_result) = serde_json::from_value::<protocol::ScreenshotResult>(result.clone()) {
+                        let filename = screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
+                        println!("{}", serde_json::json!({"saved": filename, "tabId": screenshot_result.tab_id}));
+                        return Ok(());
+                    }
+                }
+                println!("{}", serde_json::to_string_pretty(result)?);
+            }
+            return Ok(());
+        }
+    }
 
     // Handle uploadFile action - transform to fillForm with base64 file data
     let (action, params) = if action == "uploadFile" {

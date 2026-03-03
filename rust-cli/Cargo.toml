@@ -23,7 +23,7 @@ clap = { version = "4", features = ["derive", "cargo", "env"] }
 
 # WebSocket client
 tokio-tungstenite = "0.24"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "io-util", "sync", "net", "process"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "fs", "io-util", "sync", "net", "process", "signal"] }
 futures-util = "0.3"
 
 # JSON handling
