@@ -332,6 +332,10 @@ async function dispatchAction(action, params, profile) {
     // Session/Tab Management
     case "listTabs":
       return listAllTabs();
+    case "switchTab":
+      return setActiveTab({ ...params, focus: true });
+    case "listDownloads":
+      return listDownloads(params);
     case "newSession":
       return newSession(params);
     case "setActiveTab":
@@ -1009,16 +1013,21 @@ async function navigateTo(params) {
     if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
   }
 
+  // Update cache to the tab we actually navigated
+  const tab = await browser.tabs.get(tabId);
+  cachedActiveTabId = tabId;
+  cachedWindowId = tab.windowId;
+
   const result = { tabId, url: params.url };
 
   // Small delay to ensure content script is ready
   await new Promise(r => setTimeout(r, 100));
 
-  // Return content by default (annotated format)
+  // Return content by default (annotated format) - always from the navigated tab
   if (params.returnContent !== false) {
     try {
       const format = params.contentFormat || "annotated";
-      const content = await sendToContent("getContent", { format }, false);
+      const content = await sendToContent("getContent", { format, tabId }, false);
       result.content = content;
     } catch (err) {
       result.contentError = err.message;
@@ -1028,7 +1037,7 @@ async function navigateTo(params) {
   // Legacy: also return interactables if explicitly requested
   if (params.returnInteractables) {
     try {
-      const interactables = await sendToContent("getInteractables", {}, false);
+      const interactables = await sendToContent("getInteractables", { tabId }, false);
       result.interactables = interactables;
     } catch (err) {
       result.interactablesError = err.message;
@@ -1104,8 +1113,32 @@ async function sendToContentFirstSuccess(tabId, message, successTest) {
 async function captureScreenshot(params) {
   const tabId = await resolveTabId(params || {});
   const tab = await browser.tabs.get(tabId);
+  // Make the target tab active temporarily so captureVisibleTab captures it
+  const wasActive = tab.active;
+  if (!wasActive) {
+    await browser.tabs.update(tabId, { active: true });
+    await new Promise(r => setTimeout(r, 150)); // Wait for tab to render
+  }
   const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
   return { tabId, dataUrl };
+}
+
+async function listDownloads(params) {
+  const query = { orderBy: ["-startTime"], limit: (params && params.limit) || 10 };
+  if (params && params.filenameRegex) query.filenameRegex = params.filenameRegex;
+  const items = await browser.downloads.search(query);
+  return {
+    downloads: items.map(d => ({
+      id: d.id,
+      filename: d.filename,
+      url: d.url,
+      state: d.state,
+      bytesReceived: d.bytesReceived,
+      totalBytes: d.totalBytes,
+      startTime: d.startTime,
+      exists: d.exists
+    }))
+  };
 }
 
 connectNative();

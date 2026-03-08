@@ -16,6 +16,8 @@
     "notifications",
     "storage",
     "webNavigation",
+    "webRequest",
+    "downloads",
     "<all_urls>"
   ],
   "background": {
