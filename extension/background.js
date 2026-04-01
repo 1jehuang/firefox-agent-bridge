@@ -338,6 +338,8 @@ async function dispatchAction(action, params, profile) {
       return listDownloads(params);
     case "newSession":
       return newSession(params);
+    case "newWindow":
+      return newWindow(params);
     case "setActiveTab":
       return setActiveTab(params);
     case "getActiveTab":
@@ -792,21 +794,19 @@ async function listAllTabs() {
   };
 }
 
-// Create a new session (new tab)
-async function newSession(params) {
+async function openSessionTarget(params, options = {}) {
   const url = params?.url || "about:blank";
   const sandbox = params?.sandbox === true;
+  const openInWindow = options.openInWindow === true || sandbox;
   let tab;
 
-  if (sandbox) {
-    // Create a private (incognito) window for sandbox mode
-    // This gives us a clean slate: no cookies, no logins, no cache
-    const privateWindow = await browser.windows.create({
+  if (openInWindow) {
+    const createdWindow = await browser.windows.create({
       url,
-      incognito: true,
-      focused: params?.focus === true
+      incognito: sandbox,
+      focused: params?.focus ?? options.defaultFocus ?? true
     });
-    tab = privateWindow.tabs[0];
+    tab = createdWindow.tabs[0];
   } else {
     tab = await browser.tabs.create({ url, active: params?.focus === true });
   }
@@ -831,7 +831,7 @@ async function newSession(params) {
     try {
       await new Promise(r => setTimeout(r, 100)); // Wait for content script
       const format = params?.contentFormat || "annotated";
-      const content = await sendToContent("getContent", { format }, false);
+      const content = await sendToContent("getContent", { format, tabId: tab.id }, false);
       result.content = content;
     } catch (err) {
       result.contentError = err.message;
@@ -839,6 +839,16 @@ async function newSession(params) {
   }
 
   return result;
+}
+
+// Create a new session (new tab by default, private window in sandbox mode)
+async function newSession(params) {
+  return openSessionTarget(params, { openInWindow: false, defaultFocus: false });
+}
+
+// Create a new browser window and return its tab/window ids
+async function newWindow(params) {
+  return openSessionTarget(params, { openInWindow: true, defaultFocus: true });
 }
 
 // Set which tab the agent is working on

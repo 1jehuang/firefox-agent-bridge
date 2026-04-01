@@ -201,10 +201,6 @@ fn process_upload_file(message: &mut Value) -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("Missing filePath")?
         .to_string();
-    let selector = params.get("selector")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing selector")?
-        .to_string();
 
     let path = Path::new(&file_path);
     let file_data = std::fs::read(path)
@@ -216,17 +212,18 @@ fn process_upload_file(message: &mut Value) -> Result<(), String> {
         .to_string();
     let mime_type = get_mime_type(path);
 
-    // Convert to fillForm action
-    message["action"] = json!("fillForm");
+    // Keep as uploadFile action so content.js handleUploadFile receives it
+    let selector = params.get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("input[type=\"file\"]")
+        .to_string();
     message["params"] = json!({
-        "fields": [{
-            "selector": selector,
-            "file": {
-                "name": file_name,
-                "type": mime_type,
-                "data": base64_data
-            }
-        }]
+        "selector": selector,
+        "file": {
+            "name": file_name,
+            "type": mime_type,
+            "data": base64_data
+        }
     });
 
     Ok(())
@@ -848,12 +845,14 @@ async fn handle_ws_client(
             continue;
         }
 
-        // Handle uploadFile action
+        // Handle uploadFile action (only if filePath is present, meaning CLI hasn't processed it yet)
         if message.get("action").and_then(|v| v.as_str()) == Some("uploadFile") {
-            if let Err(e) = process_upload_file(&mut message) {
-                let error_msg = json!({"id": id, "ok": false, "error": e});
-                let _ = write.send(Message::Text(error_msg.to_string())).await;
-                continue;
+            if message.get("params").and_then(|p| p.get("filePath")).is_some() {
+                if let Err(e) = process_upload_file(&mut message) {
+                    let error_msg = json!({"id": id, "ok": false, "error": e});
+                    let _ = write.send(Message::Text(error_msg.to_string())).await;
+                    continue;
+                }
             }
         }
 
@@ -999,8 +998,8 @@ async fn handle_ws_client(
         let resp_ok = response.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
         if resp_ok {
             if let Some(result) = response.get("result") {
-                // Track tabId from navigate, newSession, setActiveTab responses
-                if matches!(action.as_str(), "navigate" | "newSession" | "setActiveTab") {
+                // Track tabId from navigate, newSession, newWindow, setActiveTab responses
+                if matches!(action.as_str(), "navigate" | "newSession" | "newWindow" | "setActiveTab") {
                     if let Some(tab_id) = result.get("tabId").and_then(|v| v.as_i64()) {
                         session.active_tab_id = Some(tab_id);
                     }

@@ -47,6 +47,7 @@ browser --record /path/to/dir <action> '<json_params>'
 |--------|-------------|------------|
 | `listTabs` | List all open tabs across windows | - |
 | `newSession` | Create new tab to work in | `url` (optional), `sandbox` (private window) |
+| `newWindow` | Create a new normal window to work in | `url` (optional), `focus` (defaults true), `sandbox` (private window) |
 | `setActiveTab` | Switch which tab agent works on | `tabId`, `focus` |
 | `getActiveTab` | Get current tab info | - |
 
@@ -178,8 +179,11 @@ Returns:
 ### 2. Start Fresh or Pick Existing Tab
 
 ```bash
-# Start fresh
+# Start fresh in a tab
 browser newSession '{"url": "https://amazon.com"}'
+
+# Start fresh in a new normal window
+browser newWindow '{"url": "https://example.com"}'
 
 # Start in sandbox (private window, no cookies)
 browser newSession '{"url": "https://example.com", "sandbox": true}'
@@ -530,7 +534,7 @@ This lets multiple agents work in parallel without stepping on each other.
 ## Tips
 
 1. **Start with `listTabs`** to see what's open
-2. **Use `newSession`** for a clean start
+2. **Use `newSession`** for a clean new tab or **`newWindow`** for a separate window
 3. **Use `autoLogin` when you hit a login page** - don't try to fill login forms manually, just `browser autoLogin '{"domain": "example.com", "submit": true}'`
 4. **Use `tabId`** for parallel/isolated execution
 5. **Use `annotated` format** - shows content + clickable elements together

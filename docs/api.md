@@ -5,7 +5,7 @@ All commands are JSON objects sent over WebSocket:
 ```json
 {
   "id": "optional-client-id",
-  "action": "navigate | click | type | fillForm | getContent | screenshot | getActiveTab | ping",
+  "action": "newSession | newWindow | navigate | click | type | fillForm | getContent | screenshot | getActiveTab | ping",
   "params": { "...": "..." },
   "profile": true
 }
@@ -16,6 +16,23 @@ When `profile` (or `params.profile`) is true, responses include a `timing` objec
 - `extensionMs` (background script time)
 - `contentMs` (content script time when applicable)
 ## Actions
+
+### newWindow
+
+```json
+{ "action": "newWindow", "params": { "url": "https://example.com" } }
+```
+
+Params:
+- `url` (optional, defaults to `about:blank`)
+- `focus` (optional, defaults true)
+- `wait` (optional, boolean)
+- `timeoutMs` (optional)
+- `sandbox` (optional, boolean; opens private window with no cookies/cache)
+- `returnContent` (optional, defaults true when url is not `about:blank`)
+- `contentFormat` (optional, defaults `annotated`)
+
+Returns the new window's `tabId` and `windowId`.
 
 ### navigate
 
