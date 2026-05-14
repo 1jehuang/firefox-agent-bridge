@@ -1,0 +1,37 @@
+name: Windows Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-smoke:
+    name: Windows native host smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-cli
+          key: windows-smoke-x86_64-pc-windows-msvc
+
+      - name: Build Windows binaries
+        working-directory: rust-cli
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Run Windows bridge smoke test
+        shell: pwsh
+        run: ./.github/scripts/windows_bridge_smoke.ps1 -Target x86_64-pc-windows-msvc

@@ -135,6 +135,7 @@ dependencies = [
 [[package]]
 name = "bronzewarden"
 version = "0.1.0"
+source = "git+https://github.com/1jehuang/bronzewarden.git#839dd2b97d11a3009e47ffc514f5286c8eb2a124"
 dependencies = [
  "aes",
  "anyhow",

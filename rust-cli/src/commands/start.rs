@@ -26,11 +26,26 @@ pub async fn run(url: Option<&str>, timeout_secs: u64) -> Result<()> {
 
     println!("Starting Firefox...");
 
-    // Build the firefox command
-    let mut cmd = Command::new("firefox");
-    if let Some(url) = url {
-        cmd.arg(url);
-    }
+    // Build the Firefox command. On Windows, Firefox is commonly registered in
+    // App Paths but not present on PATH, so use the shell's `start` resolution.
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/C", "start", "", "firefox"]);
+        if let Some(url) = url {
+            cmd.arg(url);
+        }
+        cmd
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut cmd = Command::new("firefox");
+        if let Some(url) = url {
+            cmd.arg(url);
+        }
+        cmd
+    };
 
     // Spawn Firefox in background (detached)
     cmd.stdout(std::process::Stdio::null())

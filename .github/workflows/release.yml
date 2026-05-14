@@ -24,21 +24,27 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             name: browser-linux-x64
+            host_name: host-linux-x64
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             name: browser-linux-x64-musl
+            host_name: host-linux-x64-musl
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             name: browser-linux-arm64
+            host_name: host-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
             name: browser-macos-x64
+            host_name: host-macos-x64
           - target: aarch64-apple-darwin
             os: macos-latest
             name: browser-macos-arm64
+            host_name: host-macos-arm64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             name: browser-windows-x64.exe
+            host_name: host-windows-x64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -70,18 +76,23 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cp rust-cli/target/${{ matrix.target }}/release/browser ${{ matrix.name }}
+          cp rust-cli/target/${{ matrix.target }}/release/firefox-agent-bridge-host ${{ matrix.host_name }}
           chmod +x ${{ matrix.name }}
+          chmod +x ${{ matrix.host_name }}
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         run: |
           copy rust-cli\target\${{ matrix.target }}\release\browser.exe ${{ matrix.name }}
+          copy rust-cli\target\${{ matrix.target }}\release\firefox-agent-bridge-host.exe ${{ matrix.host_name }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          name: ${{ matrix.target }}-binaries
+          path: |
+            ${{ matrix.name }}
+            ${{ matrix.host_name }}
 
   release:
     name: Create Release
@@ -142,6 +153,17 @@ jobs:
             | macOS Intel | `browser-macos-x64` |
             | macOS Apple Silicon | `browser-macos-arm64` |
             | Windows x64 | `browser-windows-x64.exe` |
+
+            Native messaging host binaries are also attached for automated setup:
+
+            | Platform | Host binary |
+            |----------|-------------|
+            | Linux x64 | `host-linux-x64` |
+            | Linux x64 (static) | `host-linux-x64-musl` |
+            | Linux ARM64 | `host-linux-arm64` |
+            | macOS Intel | `host-macos-x64` |
+            | macOS Apple Silicon | `host-macos-arm64` |
+            | Windows x64 | `host-windows-x64.exe` |
 
             **Quick install (Linux/macOS):**
             ```bash
