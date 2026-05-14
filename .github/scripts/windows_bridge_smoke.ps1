@@ -75,13 +75,13 @@ $hostStart.RedirectStandardOutput = $true
 $hostStart.RedirectStandardError = $true
 $hostStart.CreateNoWindow = $true
 $hostStart.Environment["FAB_REQUEST_TIMEOUT_MS"] = "5000"
-$host = [System.Diagnostics.Process]::Start($hostStart)
+$hostProc = [System.Diagnostics.Process]::Start($hostStart)
 
 try {
     Start-Sleep -Milliseconds 500
-    if ($host.HasExited) {
-        $err = $host.StandardError.ReadToEnd()
-        throw "Host exited early with code $($host.ExitCode): $err"
+    if ($hostProc.HasExited) {
+        $err = $hostProc.StandardError.ReadToEnd()
+        throw "Host exited early with code $($hostProc.ExitCode): $err"
     }
 
     $clientStart = New-Object System.Diagnostics.ProcessStartInfo
@@ -93,7 +93,7 @@ try {
     $clientStart.CreateNoWindow = $true
     $client = [System.Diagnostics.Process]::Start($clientStart)
 
-    $nativeMessage = Read-NativeMessage $host.StandardOutput.BaseStream
+    $nativeMessage = Read-NativeMessage $hostProc.StandardOutput.BaseStream
     if ($nativeMessage.action -ne "ping") {
         throw "Expected native ping action, got: $($nativeMessage | ConvertTo-Json -Depth 32 -Compress)"
     }
@@ -101,7 +101,7 @@ try {
         throw "Native ping message did not include an id"
     }
 
-    Write-NativeMessage $host.StandardInput.BaseStream @{
+    Write-NativeMessage $hostProc.StandardInput.BaseStream @{
         id = $nativeMessage.id
         ok = $true
         result = @{ pong = $true }
@@ -122,8 +122,8 @@ try {
 
     Write-Host "Windows native host smoke test passed"
 } finally {
-    if ($host -and -not $host.HasExited) {
-        $host.Kill()
-        $host.WaitForExit(5000) | Out-Null
+    if ($hostProc -and -not $hostProc.HasExited) {
+        $hostProc.Kill()
+        $hostProc.WaitForExit(5000) | Out-Null
     }
 }
