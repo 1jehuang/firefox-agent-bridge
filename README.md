@@ -40,6 +40,21 @@ cd ..
 ./scripts/install-native-host.sh
 ```
 
+### Windows support
+
+Windows is supported for the core Firefox bridge flow when both release binaries are installed:
+
+- `browser-windows-x64.exe` - CLI client
+- `host-windows-x64.exe` - Firefox native messaging host
+
+Firefox still requires a native messaging host manifest registered under
+`HKCU\Software\Mozilla\NativeMessagingHosts\firefox_agent_bridge`. Downstream installers such as
+`jcode browser setup` can stage the host binary, write the manifest, and create this registry entry.
+
+Known limitation: persistent `browser session ...` mode currently uses Unix-domain sockets and is
+disabled on Windows. Direct one-shot browser commands and the native messaging host are expected to
+compile and run on Windows.
+
 ### 3. Install the CLI
 
 ```bash
