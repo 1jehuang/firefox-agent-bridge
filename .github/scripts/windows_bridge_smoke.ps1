@@ -127,3 +127,5 @@ try {
         $hostProc.WaitForExit(5000) | Out-Null
     }
 }
+
+exit 0
