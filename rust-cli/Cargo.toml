@@ -44,7 +44,7 @@ anyhow = "1"
 dirs = "5"
 
 # Vault credential lookup
-bronzewarden = { path = "../../projects/bronzewarden" }
+bronzewarden = { git = "https://github.com/1jehuang/bronzewarden.git" }
 rpassword = "7"
 
 [dev-dependencies]
