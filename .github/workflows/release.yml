@@ -25,14 +25,6 @@ jobs:
             os: ubuntu-latest
             name: browser-linux-x64
             host_name: host-linux-x64
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            name: browser-linux-x64-musl
-            host_name: host-linux-x64-musl
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: browser-linux-arm64
-            host_name: host-linux-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
             name: browser-macos-x64
@@ -148,8 +140,6 @@ jobs:
             | Platform | Binary |
             |----------|--------|
             | Linux x64 | `browser-linux-x64` |
-            | Linux x64 (static) | `browser-linux-x64-musl` |
-            | Linux ARM64 | `browser-linux-arm64` |
             | macOS Intel | `browser-macos-x64` |
             | macOS Apple Silicon | `browser-macos-arm64` |
             | Windows x64 | `browser-windows-x64.exe` |
@@ -159,8 +149,6 @@ jobs:
             | Platform | Host binary |
             |----------|-------------|
             | Linux x64 | `host-linux-x64` |
-            | Linux x64 (static) | `host-linux-x64-musl` |
-            | Linux ARM64 | `host-linux-arm64` |
             | macOS Intel | `host-macos-x64` |
             | macOS Apple Silicon | `host-macos-arm64` |
             | Windows x64 | `host-windows-x64.exe` |
