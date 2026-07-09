@@ -91,10 +91,10 @@ struct SessionState {
     session_id: Option<String>,
 }
 
-pub async fn run(name: &str) -> Result<()> {
+pub async fn run(name: &str, bind_window: bool) -> Result<()> {
     #[cfg(not(unix))]
     {
-        let _ = name;
+        let _ = (name, bind_window);
         return Err(anyhow!(
             "Persistent browser sessions are not supported on this platform yet. Use direct browser commands instead."
         ));
@@ -148,6 +148,53 @@ pub async fn run(name: &str) -> Result<()> {
             }
         }
 
+        // Optionally bind this session to a dedicated browser window so
+        // parallel agent sessions do not fight over the shared active tab.
+        let mut bound_window_id: Option<i64> = None;
+        if bind_window {
+            let bind_req = json!({
+                "id": "sess_bind_window",
+                "action": "newSession",
+                "params": {
+                    "window": true,
+                    "focus": false,
+                    "url": "about:blank",
+                    "returnContent": false
+                }
+            });
+            state
+                .lock()
+                .await
+                .ws_write
+                .send(Message::Text(bind_req.to_string()))
+                .await
+                .map_err(|e| anyhow!("WS send error while binding window: {}", e))?;
+            let bind_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+            while tokio::time::Instant::now() < bind_deadline {
+                let msg = match timeout(Duration::from_secs(20), ws_read.next()).await {
+                    Ok(Some(Ok(Message::Text(text)))) => text,
+                    Ok(Some(Ok(_))) => continue,
+                    _ => break,
+                };
+                if let Ok(resp) = serde_json::from_str::<Value>(&msg) {
+                    if resp.get("id").and_then(|v| v.as_str()) == Some("sess_bind_window") {
+                        bound_window_id = resp
+                            .get("result")
+                            .and_then(|r| r.get("windowId"))
+                            .and_then(|v| v.as_i64());
+                        break;
+                    }
+                }
+            }
+            match bound_window_id {
+                Some(win) => eprintln!("[session:{}] Bound to window {}", name, win),
+                None => eprintln!(
+                    "[session:{}] Warning: failed to bind dedicated window; continuing unbound",
+                    name
+                ),
+            }
+        }
+
         // Write PID file
         std::fs::write(&pid_path, std::process::id().to_string())?;
 
@@ -163,6 +210,7 @@ pub async fn run(name: &str) -> Result<()> {
                 "session": name,
                 "socket": sock_path.to_string_lossy(),
                 "pid": std::process::id(),
+                "windowId": bound_window_id,
             })
         );
 

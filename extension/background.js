@@ -331,7 +331,7 @@ async function dispatchAction(action, params, profile) {
 
     // Session/Tab Management
     case "listTabs":
-      return listAllTabs();
+      return listAllTabs(params);
     case "switchTab":
       return setActiveTab({ ...params, focus: true });
     case "listDownloads":
@@ -343,7 +343,7 @@ async function dispatchAction(action, params, profile) {
     case "setActiveTab":
       return setActiveTab(params);
     case "getActiveTab":
-      return getActiveTabInfo();
+      return getActiveTabInfo(params);
 
     // Navigation
     case "navigate":
@@ -704,6 +704,13 @@ async function executeParallel(params, profile) {
 
 async function resolveTabId(params) {
   if (params && Number.isInteger(params.tabId)) return params.tabId;
+  // Window-scoped resolution: use the active tab of the given window without
+  // touching the shared global cache (parallel-agent isolation).
+  if (params && Number.isInteger(params.windowId)) {
+    const winTabs = await browser.tabs.query({ active: true, windowId: params.windowId });
+    if (!winTabs.length) throw new Error(`No active tab found in window ${params.windowId}`);
+    return winTabs[0].id;
+  }
   if (Number.isInteger(cachedActiveTabId) && Number.isInteger(cachedWindowId)) {
     return cachedActiveTabId;
   }
@@ -714,8 +721,8 @@ async function resolveTabId(params) {
   return tabs[0].id;
 }
 
-async function getActiveTabInfo() {
-  const tabId = await resolveTabId({});
+async function getActiveTabInfo(params) {
+  const tabId = await resolveTabId(params || {});
   const tab = await browser.tabs.get(tabId);
   return { tabId: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId };
 }
@@ -762,9 +769,13 @@ async function listFrames(params) {
   return { frames: results, tabId };
 }
 
-async function listAllTabs() {
-  const tabs = await browser.tabs.query({});
-  const windows = await browser.windows.getAll();
+async function listAllTabs(params) {
+  const filterWindowId = Number.isInteger(params?.windowId) ? params.windowId : null;
+  const tabs = await browser.tabs.query(filterWindowId !== null ? { windowId: filterWindowId } : {});
+  const allWindows = await browser.windows.getAll();
+  const windows = filterWindowId !== null
+    ? allWindows.filter(w => w.id === filterWindowId)
+    : allWindows;
 
   const tabsByWindow = {};
   for (const win of windows) {
@@ -808,15 +819,22 @@ async function openSessionTarget(params, options = {}) {
     });
     tab = createdWindow.tabs[0];
   } else {
-    tab = await browser.tabs.create({ url, active: params?.focus === true });
+    const createProps = { url, active: params?.focus === true };
+    if (Number.isInteger(params?.windowId)) {
+      createProps.windowId = params.windowId;
+      createProps.active = true;
+    }
+    tab = await browser.tabs.create(createProps);
   }
 
   if (url !== "about:blank" && params?.wait !== false) {
     await waitForTabComplete(tab.id, params?.timeoutMs || 15000);
   }
 
-  cachedActiveTabId = tab.id;
-  cachedWindowId = tab.windowId;
+  if (!Number.isInteger(params?.windowId)) {
+    cachedActiveTabId = tab.id;
+    cachedWindowId = tab.windowId;
+  }
 
   const result = {
     tabId: tab.id,
@@ -841,9 +859,11 @@ async function openSessionTarget(params, options = {}) {
   return result;
 }
 
-// Create a new session (new tab by default, private window in sandbox mode)
+// Create a new session (new tab by default; dedicated window with window:true,
+// private window in sandbox mode)
 async function newSession(params) {
-  return openSessionTarget(params, { openInWindow: false, defaultFocus: false });
+  const openInWindow = params?.window === true;
+  return openSessionTarget(params, { openInWindow, defaultFocus: false });
 }
 
 // Create a new browser window and return its tab/window ids
@@ -1014,7 +1034,9 @@ async function navigateTo(params) {
   let tabId;
 
   if (params.newTab) {
-    const tab = await browser.tabs.create({ url: params.url, active: true });
+    const createProps = { url: params.url, active: true };
+    if (Number.isInteger(params.windowId)) createProps.windowId = params.windowId;
+    const tab = await browser.tabs.create(createProps);
     tabId = tab.id;
     if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
   } else {
@@ -1025,10 +1047,12 @@ async function navigateTo(params) {
 
   // Update cache to the tab we actually navigated
   const tab = await browser.tabs.get(tabId);
-  cachedActiveTabId = tabId;
-  cachedWindowId = tab.windowId;
+  if (!Number.isInteger(params.windowId)) {
+    cachedActiveTabId = tabId;
+    cachedWindowId = tab.windowId;
+  }
 
-  const result = { tabId, url: params.url };
+  const result = { tabId, windowId: tab.windowId, url: params.url };
 
   // Small delay to ensure content script is ready
   await new Promise(r => setTimeout(r, 100));
@@ -1067,7 +1091,17 @@ async function sendToContent(action, params, profile) {
   }
   // Default to main frame (frameId: 0) to avoid responding from iframes like Stripe trackers
   const frameId = (params && Number.isInteger(params.frameId)) ? params.frameId : 0;
-  return browser.tabs.sendMessage(tabId, message, { frameId });
+  try {
+    return await browser.tabs.sendMessage(tabId, message, { frameId });
+  } catch (e) {
+    if (e.message && e.message.includes("Could not establish connection")) {
+      // Content script not injected - try programmatic injection
+      await browser.tabs.executeScript(tabId, { file: "content.js", frameId, runAt: "document_idle" });
+      await new Promise(r => setTimeout(r, 200));
+      return browser.tabs.sendMessage(tabId, message, { frameId });
+    }
+    throw e;
+  }
 }
 
 async function sendToContentAllFrames(tabId, message) {
@@ -1122,6 +1156,16 @@ async function sendToContentFirstSuccess(tabId, message, successTest) {
 
 async function captureScreenshot(params) {
   const tabId = await resolveTabId(params || {});
+  // Prefer captureTab: captures a specific tab without stealing focus
+  // (critical when multiple agents drive different windows in parallel).
+  if (typeof browser.tabs.captureTab === "function") {
+    try {
+      const dataUrl = await browser.tabs.captureTab(tabId, { format: "png" });
+      return { tabId, dataUrl };
+    } catch (e) {
+      // Fall through to legacy captureVisibleTab path
+    }
+  }
   const tab = await browser.tabs.get(tabId);
   // Make the target tab active temporarily so captureVisibleTab captures it
   const wasActive = tab.active;

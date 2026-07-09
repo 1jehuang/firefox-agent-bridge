@@ -27,13 +27,17 @@ async fn main() -> Result<()> {
             Command::Setup { target } => setup::run(&target),
             Command::Start { url, timeout } => start::run(url.as_deref(), timeout).await,
             Command::Session { action } => match action {
-                SessionAction::Start { name } => session::run(&name).await,
+                SessionAction::Start { name, bind_window } => {
+                    session::run(&name, bind_window).await
+                }
                 SessionAction::Stop { name } => session::stop(&name).await,
                 SessionAction::List => session::list(),
             },
-            Command::Dev { source_dir, port, watch } => {
-                dev::run(source_dir.as_deref(), port, watch).await
-            }
+            Command::Dev {
+                source_dir,
+                port,
+                watch,
+            } => dev::run(source_dir.as_deref(), port, watch).await,
         };
     }
 
@@ -77,9 +81,9 @@ async fn main() -> Result<()> {
             serde_json::from_str(&content)
                 .map_err(|e| anyhow::anyhow!("Invalid JSON in file '{}': {}", file_path, e))?
         }
-        Some(p) => serde_json::from_str(p).map_err(|e| {
-            anyhow::anyhow!("Invalid JSON params: {}", e)
-        })?,
+        Some(p) => {
+            serde_json::from_str(p).map_err(|e| anyhow::anyhow!("Invalid JSON params: {}", e))?
+        }
         None => serde_json::json!({}),
     };
 
@@ -87,12 +91,19 @@ async fn main() -> Result<()> {
     if let Ok(session_name) = std::env::var("BROWSER_SESSION") {
         if session::is_session_running(&session_name) {
             // Route through the session daemon for tab isolation
-            let response = session::send_via_session(&session_name, &action, params.clone()).await?;
+            let response =
+                session::send_via_session(&session_name, &action, params.clone()).await?;
 
             // Handle response the same way as direct mode
-            let ok = response.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+            let ok = response
+                .get("ok")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if !ok {
-                let error = response.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                let error = response
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
                 eprintln!("Error: {}", error);
                 std::process::exit(1);
             }
@@ -100,9 +111,15 @@ async fn main() -> Result<()> {
             if let Some(result) = response.get("result") {
                 // Screenshot handling
                 if action == "screenshot" {
-                    if let Ok(screenshot_result) = serde_json::from_value::<protocol::ScreenshotResult>(result.clone()) {
-                        let filename = screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
-                        println!("{}", serde_json::json!({"saved": filename, "tabId": screenshot_result.tab_id}));
+                    if let Ok(screenshot_result) =
+                        serde_json::from_value::<protocol::ScreenshotResult>(result.clone())
+                    {
+                        let filename =
+                            screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
+                        println!(
+                            "{}",
+                            serde_json::json!({"saved": filename, "tabId": screenshot_result.tab_id})
+                        );
                         return Ok(());
                     }
                 }
@@ -114,10 +131,12 @@ async fn main() -> Result<()> {
 
     // Handle uploadFile action - transform to fillForm with base64 file data
     let (action, params) = if action == "uploadFile" {
-        let selector = params.get("selector")
+        let selector = params
+            .get("selector")
             .and_then(|s| s.as_str())
-            .ok_or_else(|| anyhow::anyhow!("uploadFile requires 'selector' param"))?;
-        let file_path = params.get("path")
+            .unwrap_or("input[type=\"file\"]");
+        let file_path = params
+            .get("path")
             .and_then(|s| s.as_str())
             .ok_or_else(|| anyhow::anyhow!("uploadFile requires 'path' param"))?;
 
@@ -133,7 +152,10 @@ async fn main() -> Result<()> {
             .unwrap_or("file");
 
         // Detect MIME type from extension
-        let mime_type = match std::path::Path::new(file_path).extension().and_then(|e| e.to_str()) {
+        let mime_type = match std::path::Path::new(file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
             Some("pdf") => "application/pdf",
             Some("png") => "image/png",
             Some("jpg") | Some("jpeg") => "image/jpeg",
@@ -143,7 +165,9 @@ async fn main() -> Result<()> {
             Some("json") => "application/json",
             Some("zip") => "application/zip",
             Some("doc") => "application/msword",
-            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("docx") => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
             Some("mp4") => "video/mp4",
             Some("mov") => "video/quicktime",
             Some("webm") => "video/webm",
@@ -156,24 +180,24 @@ async fn main() -> Result<()> {
             _ => "application/octet-stream",
         };
 
-        // Transform to fillForm params
-        let fill_params = serde_json::json!({
-            "fields": [{
-                "selector": selector,
-                "file": {
-                    "name": filename,
-                    "type": mime_type,
-                    "data": base64_data
-                }
-            }]
+        // Keep as uploadFile so content.js handleUploadFile receives it
+        let upload_params = serde_json::json!({
+            "selector": selector,
+            "file": {
+                "name": filename,
+                "type": mime_type,
+                "data": base64_data
+            }
         });
 
-        ("fillForm".to_string(), fill_params)
+        ("uploadFile".to_string(), upload_params)
     } else if action == "dropFile" {
-        let selector = params.get("selector")
+        let selector = params
+            .get("selector")
             .and_then(|s| s.as_str())
             .unwrap_or("[contenteditable=\"true\"]");
-        let file_path = params.get("path")
+        let file_path = params
+            .get("path")
             .and_then(|s| s.as_str())
             .ok_or_else(|| anyhow::anyhow!("dropFile requires 'path' param"))?;
 
@@ -187,7 +211,10 @@ async fn main() -> Result<()> {
             .and_then(|n| n.to_str())
             .unwrap_or("file");
 
-        let mime_type = match std::path::Path::new(file_path).extension().and_then(|e| e.to_str()) {
+        let mime_type = match std::path::Path::new(file_path)
+            .extension()
+            .and_then(|e| e.to_str())
+        {
             Some("pdf") => "application/pdf",
             Some("png") => "image/png",
             Some("jpg") | Some("jpeg") => "image/jpeg",
@@ -198,7 +225,9 @@ async fn main() -> Result<()> {
             Some("zip") => "application/zip",
             Some("tex") => "application/x-tex",
             Some("doc") => "application/msword",
-            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            Some("docx") => {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            }
             Some("mp4") => "video/mp4",
             Some("mov") => "video/quicktime",
             Some("webm") => "video/webm",
@@ -228,7 +257,9 @@ async fn main() -> Result<()> {
     // Initialize recorder if --record is set or recording marker file exists
     let record_dir = cli.record.clone().or_else(|| {
         let marker = dirs::home_dir()?.join(".recording_dir");
-        std::fs::read_to_string(marker).ok().map(|s| s.trim().to_string())
+        std::fs::read_to_string(marker)
+            .ok()
+            .map(|s| s.trim().to_string())
     });
     let rec = if let Some(ref dir) = record_dir {
         let path = std::path::Path::new(dir);
@@ -248,7 +279,10 @@ async fn main() -> Result<()> {
 
     // Record the action if recording
     if let Some(ref rec) = rec {
-        if let Err(e) = rec.record_action(&action, &params, &response, timing.total_ms).await {
+        if let Err(e) = rec
+            .record_action(&action, &params, &response, timing.total_ms)
+            .await
+        {
             eprintln!("Recording error: {}", e);
         }
     }
@@ -259,8 +293,11 @@ async fn main() -> Result<()> {
             // Special handling for screenshots
             if action == "screenshot" {
                 if let Some(ref res) = result {
-                    if let Ok(screenshot_result) = serde_json::from_value::<protocol::ScreenshotResult>(res.clone()) {
-                        let filename = screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
+                    if let Ok(screenshot_result) =
+                        serde_json::from_value::<protocol::ScreenshotResult>(res.clone())
+                    {
+                        let filename =
+                            screenshot::save_screenshot(&screenshot_result, cli.params.as_deref())?;
                         let mut output = serde_json::json!({
                             "saved": filename,
                             "tabId": screenshot_result.tab_id
@@ -295,8 +332,10 @@ async fn main() -> Result<()> {
         }
         protocol::Response::Error { error, .. } => {
             if cli.timing {
-                eprintln!("Error: {} (timing: {}ms total, {}ms connect, {}ms roundtrip)",
-                    error, timing.total_ms, timing.connect_ms, timing.roundtrip_ms);
+                eprintln!(
+                    "Error: {} (timing: {}ms total, {}ms connect, {}ms roundtrip)",
+                    error, timing.total_ms, timing.connect_ms, timing.roundtrip_ms
+                );
             } else {
                 eprintln!("Error: {}", error);
             }

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 struct ClientSession {
     id: String,
     active_tab_id: Option<i64>,
+    window_id: Option<i64>,
     forks: HashMap<String, i64>, // fork_name -> tabId
 }
 
@@ -717,6 +718,7 @@ async fn handle_ws_client(
     let mut session = ClientSession {
         id: session_id.clone(),
         active_tab_id: None,
+        window_id: None,
         forks: HashMap::new(),
     };
     log!("Session {} connected", session.id);
@@ -775,6 +777,7 @@ async fn handle_ws_client(
                     "type": "session_info",
                     "sessionId": session.id,
                     "activeTabId": session.active_tab_id,
+                    "windowId": session.window_id,
                     "forks": session.forks.keys().collect::<Vec<_>>()
                 });
                 let _ = write.send(Message::Text(info.to_string())).await;
@@ -799,8 +802,9 @@ async fn handle_ws_client(
 
         let action = message.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Session-scoped tab injection: if the message doesn't have an explicit
-        // tabId and the action needs a tab, inject the session's active tab.
+        // Session-scoped tab/window injection: if the message doesn't have an
+        // explicit tabId and the action needs a tab, inject the session's active
+        // tab (and window scope for isolation between parallel sessions).
         if action_needs_tab(&action) {
             let has_explicit_tab = message.get("params")
                 .and_then(|p| p.get("tabId"))
@@ -812,6 +816,30 @@ async fn handle_ws_client(
                         params["tabId"] = json!(tab_id);
                     } else {
                         message["params"] = json!({"tabId": tab_id});
+                    }
+                } else if let Some(window_id) = session.window_id {
+                    if let Some(params) = message.get_mut("params") {
+                        params["windowId"] = json!(window_id);
+                    } else {
+                        message["params"] = json!({"windowId": window_id});
+                    }
+                }
+            }
+        }
+
+        // Window-scoped listing/creation: scope listTabs/newSession/navigate
+        // newTab to the session's window when no explicit target was given.
+        if matches!(action.as_str(), "listTabs" | "newSession" | "getActiveTab" | "navigate") {
+            let has_explicit_window = message.get("params")
+                .and_then(|p| p.get("windowId"))
+                .and_then(|v| v.as_i64())
+                .is_some();
+            if !has_explicit_window {
+                if let Some(window_id) = session.window_id {
+                    if let Some(params) = message.get_mut("params") {
+                        params["windowId"] = json!(window_id);
+                    } else {
+                        message["params"] = json!({"windowId": window_id});
                     }
                 }
             }
@@ -1002,6 +1030,9 @@ async fn handle_ws_client(
                 if matches!(action.as_str(), "navigate" | "newSession" | "newWindow" | "setActiveTab") {
                     if let Some(tab_id) = result.get("tabId").and_then(|v| v.as_i64()) {
                         session.active_tab_id = Some(tab_id);
+                    }
+                    if let Some(window_id) = result.get("windowId").and_then(|v| v.as_i64()) {
+                        session.window_id = Some(window_id);
                     }
                 }
                 // Track forks created by this session
