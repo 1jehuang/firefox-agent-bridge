@@ -25,7 +25,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 
 #[cfg(unix)]
-use crate::config::{TIMEOUT_MS, WS_URL};
+use crate::config::{ws_url, TIMEOUT_MS};
 
 fn runtime_dir() -> PathBuf {
     #[cfg(windows)]
@@ -114,7 +114,7 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
 
         eprintln!("[session:{}] Connecting to browser bridge...", name);
 
-        let (ws_stream, _) = connect_async(WS_URL).await.map_err(|e| {
+        let (ws_stream, _) = connect_async(ws_url()).await.map_err(|e| {
             anyhow!(
                 "WebSocket error: {}\nIs Firefox running with the Browser Agent Bridge extension?",
                 e
