@@ -642,7 +642,7 @@ async function executeParallel(params, profile) {
 
       // Wait for page load if URL provided
       if (branch.url) {
-        await waitForTabComplete(tab.id, branch.timeoutMs || 15000);
+        await waitForTabComplete(tab.id, branch.timeoutMs || 15000, branch.url);
         // Small delay for content script
         await new Promise(r => setTimeout(r, 100));
       }
@@ -1006,26 +1006,85 @@ async function listForks() {
   return { forks, count: forks.length };
 }
 
-async function waitForTabComplete(tabId, timeoutMs = 15000) {
+async function waitForTabComplete(tabId, timeoutMs = 15000, expectedUrl = null) {
+  // Normalize an expected URL for same-document detection (compare ignoring the
+  // hash so we can tell a hash-only change apart from a full navigation).
+  function stripHash(u) {
+    if (!u) return null;
+    try {
+      const parsed = new URL(u);
+      parsed.hash = "";
+      return parsed.href;
+    } catch (_e) {
+      return u;
+    }
+  }
+  const expectedNoHash = stripHash(expectedUrl);
+  const expectedHasHash = !!(expectedUrl && expectedUrl.includes("#"));
+
   return new Promise((resolve, reject) => {
+    let settled = false;
+
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("Timed out waiting for page load"));
     }, timeoutMs);
 
+    function finish() {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ tabId });
+    }
+
+    // Full document loads fire tabs.onUpdated with status === "complete".
     function onUpdated(updatedTabId, info) {
       if (updatedTabId === tabId && info.status === "complete") {
-        cleanup();
-        resolve({ tabId });
+        finish();
       }
+    }
+
+    // Same-document navigations (hash change, history.pushState) never emit a
+    // "complete" status, so tabs.onUpdated alone would hang until timeout.
+    // webNavigation surfaces them via dedicated events. Match the tab and, when
+    // we know the target, the destination URL (ignoring hash) so we don't
+    // resolve on an unrelated in-page navigation.
+    function onSameDocument(details) {
+      if (details.tabId !== tabId || details.frameId !== 0) return;
+      if (expectedNoHash && stripHash(details.url) !== expectedNoHash) return;
+      finish();
     }
 
     function cleanup() {
       clearTimeout(timer);
       browser.tabs.onUpdated.removeListener(onUpdated);
+      if (browser.webNavigation) {
+        browser.webNavigation.onReferenceFragmentUpdated.removeListener(onSameDocument);
+        browser.webNavigation.onHistoryStateUpdated.removeListener(onSameDocument);
+      }
     }
 
     browser.tabs.onUpdated.addListener(onUpdated);
+    if (browser.webNavigation) {
+      browser.webNavigation.onReferenceFragmentUpdated.addListener(onSameDocument);
+      browser.webNavigation.onHistoryStateUpdated.addListener(onSameDocument);
+    }
+
+    // Pre-check: the navigation may already be finished before the listeners
+    // were attached (fast/cached loads, or a hash-only change that Firefox
+    // applied synchronously). Resolve immediately in that case so we never wait
+    // for an event that has already fired.
+    browser.tabs.get(tabId).then((tab) => {
+      if (!tab) return;
+      const currentNoHash = stripHash(tab.url);
+      const urlMatches =
+        !expectedUrl ||
+        tab.url === expectedUrl ||
+        (expectedHasHash && currentNoHash === expectedNoHash);
+      if (tab.status === "complete" && urlMatches) {
+        finish();
+      }
+    }).catch(() => {});
   });
 }
 
@@ -1038,11 +1097,11 @@ async function navigateTo(params) {
     if (Number.isInteger(params.windowId)) createProps.windowId = params.windowId;
     const tab = await browser.tabs.create(createProps);
     tabId = tab.id;
-    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs, params.url);
   } else {
     tabId = await resolveTabId(params);
     await browser.tabs.update(tabId, { url: params.url });
-    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
+    if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs, params.url);
   }
 
   // Update cache to the tab we actually navigated
