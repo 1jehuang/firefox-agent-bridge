@@ -104,6 +104,10 @@ jobs:
           for dir in artifacts/*/; do
             cp "$dir"* release/
           done
+          python3 scripts/build-extensions.py
+          # Firefox needs the AMO-signed XPI, which is attached separately.
+          # The locally built XPI is unsigned, so do not publish it.
+          cp dist/*.zip release/
           ls -la release/
 
       - name: Create checksums
@@ -152,6 +156,14 @@ jobs:
             | macOS Intel | `host-macos-x64` |
             | macOS Apple Silicon | `host-macos-arm64` |
             | Windows x64 | `host-windows-x64.exe` |
+
+            Browser extension packages:
+
+            | Browser | Package |
+            |---------|---------|
+            | Firefox | `browser-agent-bridge-<version>.xpi` |
+            | Chrome, Edge, Brave, Chromium | `browser-agent-bridge-chrome-<version>.zip` (load unpacked) |
+            | Safari (macOS) | `browser-agent-bridge-safari-<version>.zip` (convert with `scripts/package-safari.sh`) |
 
             **Quick install (Linux/macOS):**
             ```bash

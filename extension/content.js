@@ -1,4 +1,10 @@
 /* eslint-env browser */
+// Cross-browser shim: Chromium exposes chrome.* (promise-based in MV3), while
+// Firefox and Safari expose browser.*.
+if (typeof globalThis.browser === "undefined" && typeof globalThis.chrome !== "undefined") {
+  globalThis.browser = globalThis.chrome;
+}
+const FAB_IS_GECKO = typeof window.wrappedJSObject !== "undefined";
 function roundMs(value) {
   return Math.round(value * 100) / 100;
 }
@@ -8,7 +14,7 @@ function runInPageWorld(code) {
     try {
       const pageWin = window.wrappedJSObject;
       if (!pageWin) {
-        resolve({ ok: false, error: 'no wrappedJSObject' });
+        runInPageWorldViaScriptElement(code).then(resolve);
         return;
       }
       const wrapped = '(function(){' + code + '})()';
@@ -46,6 +52,37 @@ function runInPageWorld(code) {
   });
 }
 
+// Page-world evaluation for browsers without Firefox Xray wrappers (Chromium,
+// Safari). Injects an inline <script>, which is subject to the page CSP, and
+// passes the serialized result back through a DOM CustomEvent.
+function runInPageWorldViaScriptElement(code) {
+  return new Promise((resolve) => {
+    const eventName = '__fab_result_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener(eventName, onResult);
+      resolve(value);
+    };
+    const onResult = (event) => {
+      try { finish(JSON.parse(event.detail)); } catch (e) { finish({ ok: false, error: 'Unparseable page-world result' }); }
+    };
+    document.addEventListener(eventName, onResult);
+    const source = '(function(){' +
+      'var emit=function(v){document.dispatchEvent(new CustomEvent(' + JSON.stringify(eventName) + ',{detail:JSON.stringify(v)}));};' +
+      'var ser=function(r){if(r===undefined)return null;try{return JSON.parse(JSON.stringify(r));}catch(e){return String(r);}};' +
+      'try{Promise.resolve((function(){' + code + '\n})()).then(function(r){emit({ok:true,value:ser(r)});},function(e){emit({ok:false,error:(e&&e.message)||String(e)});});}' +
+      'catch(e){emit({ok:false,error:(e&&e.message)||String(e)});}' +
+      '})();';
+    const script = document.createElement('script');
+    script.textContent = source;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+    setTimeout(() => finish({ ok: false, error: 'Page-world script did not run (blocked by the page Content-Security-Policy?)' }), 3000);
+  });
+}
+
 function simulateEnterKey(el) {
   const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
   el.dispatchEvent(new KeyboardEvent('keydown', opts));
@@ -57,8 +94,13 @@ function simulateEnterKey(el) {
 
 function contentEditableInsertText(el, text, clear) {
   try {
-    const pageWin = window.wrappedJSObject;
-    if (!pageWin) return { ok: false, error: 'no wrappedJSObject' };
+    // Firefox needs page-world objects (Xray wrappers hide content-script
+    // events from page frameworks). Chromium and Safari share DOM event objects
+    // across worlds, so the content-script window works directly.
+    const pageWin = window.wrappedJSObject || window;
+    const cloneInto = typeof globalThis.cloneInto === 'function'
+      ? globalThis.cloneInto
+      : (value) => value;
     el.focus();
     const sel = window.getSelection();
 
@@ -1454,8 +1496,20 @@ async function handleEvaluate(params) {
     return { result: result.value, type: typeof result.value, pageWorld: true };
   }
 
+  let fn;
   try {
-    const fn = new Function(params.script);
+    fn = new Function(params.script);
+  } catch (err) {
+    if (err instanceof EvalError || /unsafe-eval|Content Security Policy/i.test(String(err && err.message))) {
+      // Extension CSP forbids eval in this browser's isolated world; run in the page instead.
+      const result = await runInPageWorld(params.script);
+      if (!result.ok) throw new Error(result.error || 'Page world eval failed');
+      return { result: result.value, type: typeof result.value, pageWorld: true };
+    }
+    throw new Error(`Evaluate error: ${err.message}`);
+  }
+
+  try {
     const result = fn();
 
     // Handle promises
@@ -1833,7 +1887,7 @@ async function handleSecureAutoFill(params) {
   return filled;
 }
 
-browser.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
   const profile = Boolean(message.profile || params.profile);
@@ -1875,7 +1929,7 @@ browser.runtime.onMessage.addListener((message) => {
     }
   };
 
-  return run().then((result) => {
+  const response = run().then((result) => {
     if (!profile) return result;
     const timing = { contentMs: roundMs(performance.now() - started) };
     if (result && typeof result === "object") {
@@ -1884,4 +1938,15 @@ browser.runtime.onMessage.addListener((message) => {
     }
     return { value: result, __timing: timing };
   });
+
+  if (FAB_IS_GECKO) return response;
+
+  // Chromium (and Safari) do not accept a returned Promise from onMessage.
+  // Reply through sendResponse and encode thrown errors so the background can
+  // re-throw them with the original message.
+  response.then(
+    (result) => sendResponse(result === undefined ? null : result),
+    (err) => sendResponse({ __bridgeError: (err && err.message) || String(err) })
+  );
+  return true;
 });

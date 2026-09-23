@@ -1,4 +1,7 @@
 /* eslint-env browser */
+if (typeof globalThis.browser === "undefined" && typeof globalThis.chrome !== "undefined") {
+  globalThis.browser = globalThis.chrome;
+}
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
 const logEl = document.getElementById("log");
