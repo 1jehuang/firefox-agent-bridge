@@ -108,7 +108,17 @@ jobs:
           # Firefox needs the AMO-signed XPI, which is attached separately.
           # The locally built XPI is unsigned, so do not publish it.
           cp dist/*.zip release/
+          # Carry the newest AMO-signed XPI forward from earlier releases so
+          # every release (and jcode's auto-update) has a Firefox package.
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 --json tagName -q '.[].tagName'); do
+            if gh release download "$tag" --repo "$GITHUB_REPOSITORY" -p '*.xpi' -D release 2>/dev/null; then
+              echo "Carried signed XPI from $tag"
+              break
+            fi
+          done
           ls -la release/
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Create checksums
         working-directory: release
