@@ -194,7 +194,13 @@ fn bound_port() -> u16 {
 
 /// Record this host in the registry so clients can find it by browser.
 fn register_host(browser: Option<String>) {
-    let entry = registry::HostEntry { port: bound_port(), pid: std::process::id(), browser };
+    static PARENT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let entry = registry::HostEntry {
+        port: bound_port(),
+        pid: std::process::id(),
+        browser,
+        process: PARENT.get_or_init(registry::parent_process).clone(),
+    };
     if let Err(e) = registry::write_entry(&entry) {
         log!("Failed to record host in {}: {}", registry::registry_dir().display(), e);
     }
