@@ -50,7 +50,10 @@ cp rust-cli/target/release/browser ~/.local/bin/
 
 ## 5) Connect an Agent
 
-The native host runs a WebSocket server on `ws://127.0.0.1:8766`.
+The native host runs a WebSocket server on `ws://127.0.0.1:8766`. Each browser running the
+extension starts its own host, so a second browser's host takes the next free port
+(`8766`-`8775`) and records itself in `$XDG_RUNTIME_DIR/browser-agent-bridge/`. Set
+`FAB_BROWSER` (`chrome`, `firefox`, ...) to choose which browser the CLI talks to.
 
 ### Using the CLI
 
@@ -102,5 +105,6 @@ This installs the skill file to `~/.claude/skills/firefox-browser/SKILL.md`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FAB_WS_HOST` | `127.0.0.1` | WebSocket server host |
-| `FAB_WS_PORT` | `8766` | WebSocket server port |
+| `FAB_WS_PORT` | `8766` | WebSocket server port (pins the host to this one port) |
+| `FAB_BROWSER` | unset | CLI: talk to the host serving this browser |
 | `FAB_REQUEST_TIMEOUT_MS` | `30000` | Request timeout in milliseconds |

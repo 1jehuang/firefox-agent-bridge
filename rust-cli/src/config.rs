@@ -1,8 +1,9 @@
-/// Default WebSocket port of the native host.
-pub const DEFAULT_WS_PORT: u16 = 8766;
+pub use crate::registry::DEFAULT_WS_PORT;
 
 /// WebSocket URL of the native host. `FAB_WS_URL` overrides it entirely and
 /// `FAB_WS_PORT` overrides only the port, matching the host's own variable.
+/// Otherwise the host serving `FAB_BROWSER` is looked up in the registry, so
+/// several browsers can run the bridge at once (each host binds its own port).
 pub fn ws_url() -> String {
     if let Ok(url) = std::env::var("FAB_WS_URL") {
         if !url.trim().is_empty() {
@@ -12,6 +13,14 @@ pub fn ws_url() -> String {
     let port = std::env::var("FAB_WS_PORT")
         .ok()
         .and_then(|p| p.parse::<u16>().ok())
+        .or_else(|| {
+            let browser = std::env::var("FAB_BROWSER").ok();
+            crate::registry::select_port(
+                &crate::registry::entries(),
+                browser.as_deref(),
+                |e| crate::registry::port_is_live(e.port),
+            )
+        })
         .unwrap_or(DEFAULT_WS_PORT);
     format!("ws://127.0.0.1:{}", port)
 }

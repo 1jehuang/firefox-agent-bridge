@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod error;
 mod protocol;
+mod registry;
 mod recorder;
 
 use anyhow::Result;

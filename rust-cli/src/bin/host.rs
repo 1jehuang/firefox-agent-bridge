@@ -44,16 +44,12 @@ use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request a
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 
+#[path = "../registry.rs"]
+mod registry;
+
 /// Environment variable configuration
 fn ws_host() -> String {
     env::var("FAB_WS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
-}
-
-fn ws_port() -> u16 {
-    env::var("FAB_WS_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(8766)
 }
 
 fn relay_port() -> u16 {
@@ -187,6 +183,46 @@ macro_rules! log {
     ($($arg:tt)*) => {
         eprintln!("[firefox-agent-bridge] {}", format!($($arg)*));
     };
+}
+
+/// Port this host actually bound (set once in `main`).
+static BOUND_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
+fn bound_port() -> u16 {
+    BOUND_PORT.get().copied().unwrap_or(registry::DEFAULT_WS_PORT)
+}
+
+/// Record this host in the registry so clients can find it by browser.
+fn register_host(browser: Option<String>) {
+    static PARENT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let entry = registry::HostEntry {
+        port: bound_port(),
+        pid: std::process::id(),
+        browser,
+        process: PARENT.get_or_init(registry::parent_process).clone(),
+    };
+    if let Err(e) = registry::write_entry(&entry) {
+        log!("Failed to record host in {}: {}", registry::registry_dir().display(), e);
+    }
+}
+
+fn unregister_host() {
+    if let Some(port) = BOUND_PORT.get() {
+        registry::remove_entry(*port, std::process::id());
+    }
+}
+
+/// Ports to try for the agent WebSocket. An explicit `FAB_WS_PORT` is used
+/// alone. Otherwise every browser running the extension spawns its own host,
+/// so each takes the first free port in the range instead of dying on 8766.
+fn candidate_ports() -> Vec<u16> {
+    if let Some(port) = env::var("FAB_WS_PORT").ok().and_then(|s| s.parse().ok()) {
+        return vec![port];
+    }
+    let relay = relay_port();
+    (registry::DEFAULT_WS_PORT..registry::DEFAULT_WS_PORT + registry::PORT_RANGE)
+        .filter(|port| *port != relay)
+        .collect()
 }
 
 /// Request counter for generating unique IDs
@@ -794,7 +830,7 @@ async fn handle_ws_client(
     let ready_msg = json!({
         "type": "ready",
         "host": ws_host(),
-        "port": ws_port(),
+        "port": bound_port(),
         "sessionId": session.id
     });
     if let Err(e) = write.send(Message::Text(ready_msg.to_string())).await {
@@ -1280,6 +1316,13 @@ async fn handle_native_messages(
             }
         }
 
+        // The extension announces which browser it runs in; record it so
+        // clients asking for that browser find this host.
+        if message.get("type").and_then(|v| v.as_str()) == Some("hello") {
+            let browser = message.get("browser").and_then(|v| v.as_str()).map(str::to_string);
+            register_host(browser);
+        }
+
         // Not a response - this is an event, broadcast to all clients
         // (For now we just log it, as we don't track all connected clients for broadcasting)
         log!("Received event from browser: {}", message);
@@ -1289,8 +1332,6 @@ async fn handle_native_messages(
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     let host = ws_host();
-    let port = ws_port();
-    let addr = format!("{}:{}", host, port);
 
     // Try to unlock the bronzewarden vault at startup
     let vault: SharedVault = Arc::new(RwLock::new(None));
@@ -1360,6 +1401,7 @@ async fn main() {
         let stdin_tx = native_in_tx.clone();
         std::thread::spawn(move || {
             read_native_stdin(stdin_tx);
+            unregister_host();
             std::process::exit(0);
         });
 
@@ -1377,16 +1419,37 @@ async fn main() {
         handle_native_messages(native_in_rx, pending_clone).await;
     });
 
-    // Start WebSocket server
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            log!("Failed to bind to {}: {}", addr, e);
-            std::process::exit(1);
+    // Start WebSocket server on the first free candidate port.
+    let mut bound = None;
+    let mut last_error = None;
+    for port in candidate_ports() {
+        match TcpListener::bind(format!("{}:{}", host, port)).await {
+            Ok(listener) => {
+                bound = Some((listener, port));
+                break;
+            }
+            Err(e) => last_error = Some(format!("{}:{}: {}", host, port, e)),
         }
+    }
+    let Some((listener, port)) = bound else {
+        log!(
+            "Failed to bind the agent WebSocket ({}). Every port in {}..{} is in use; set FAB_WS_PORT to a free port.",
+            last_error.unwrap_or_default(),
+            registry::DEFAULT_WS_PORT,
+            registry::DEFAULT_WS_PORT + registry::PORT_RANGE - 1
+        );
+        std::process::exit(1);
     };
+    let _ = BOUND_PORT.set(port);
+    register_host(None);
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            unregister_host();
+            std::process::exit(0);
+        }
+    });
 
-    log!("WebSocket server listening on ws://{}", addr);
+    log!("WebSocket server listening on ws://{}:{}", host, port);
 
     loop {
         match listener.accept().await {
