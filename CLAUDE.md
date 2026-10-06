@@ -46,7 +46,7 @@ Things that need updating in SKILL.md when changed:
 
 ## Key Technical Details
 
-- WebSocket runs on port **8766** (not 8765)
+- WebSocket runs on port **8766** (not 8765); extra browsers' hosts take 8767-8775 (see `rust-cli/src/registry.rs`)
 - Extension XPI: `~/.mozilla/firefox/v5xdhgxp.default-release/extensions/browser-agent-bridge@1jehuang.github.io.xpi`
 - `uploadFile` and `dropFile` are CLI-level actions that transform into `fillForm`/`dropFile` wire messages
 - Rich text insertion uses `wrappedJSObject.eval()` to run in page world (bypasses Firefox Xray wrappers)
