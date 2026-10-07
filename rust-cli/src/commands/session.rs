@@ -16,7 +16,7 @@ use tokio::net::TcpStream;
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, Notify};
 #[cfg(unix)]
 use tokio::time::timeout;
 #[cfg(unix)]
@@ -65,19 +65,124 @@ pub fn is_session_running(name: &str) -> bool {
         return false;
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let pid_path = session_pid_path(name);
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                let proc_path = format!("/proc/{}", pid);
-                if std::path::Path::new(&proc_path).exists() {
-                    return true;
+        session_is_alive(&session_pid_path(name), &session_socket_path(name))
+    }
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    // Reject process-group IDs and values that overflow pid_t.
+    if pid == 0 || pid > i32::MAX as u32 {
+        return false;
+    }
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(unix)]
+fn session_is_alive(pid_path: &std::path::Path, socket_path: &std::path::Path) -> bool {
+    std::fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|pid| pid.trim().parse::<u32>().ok())
+        .is_some_and(|pid| {
+            process_is_alive(pid) && std::os::unix::net::UnixStream::connect(socket_path).is_ok()
+        })
+}
+
+fn window_path(name: &str) -> PathBuf {
+    runtime_dir().join(format!("browser-session-{}.window.json", name))
+}
+
+#[cfg(unix)]
+async fn close_bound_window(name: &str) -> Result<()> {
+    let path = window_path(name);
+    if !path.exists() {
+        return Ok(());
+    }
+    let window: Value = serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+    let url = window["wsUrl"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing window host URL"))?;
+    // A manually closed window is already clean, including with older
+    // extensions that do not implement closeWindow.
+    let tabs = timeout(
+        Duration::from_secs(3),
+        crate::client::send_command_to_url(
+            url,
+            "listTabs",
+            json!({"windowId": window["windowId"]}),
+        ),
+    )
+    .await
+    .map_err(|_| anyhow!("Timeout checking session window"))??;
+    if let crate::protocol::Response::Success {
+        ok: true,
+        result: Some(tabs),
+    } = tabs
+    {
+        if let Some(windows) = tabs["windows"].as_array() {
+            if !windows
+                .iter()
+                .any(|entry| entry["windowId"] == window["windowId"])
+            {
+                std::fs::remove_file(path)?;
+                return Ok(());
+            }
+        }
+    }
+    let response = timeout(
+        Duration::from_secs(3),
+        crate::client::send_command_to_url(
+            url,
+            "closeWindow",
+            json!({"windowId": window["windowId"], "tabId": window["tabId"]}),
+        ),
+    )
+    .await
+    .map_err(|_| anyhow!("Timeout closing session window"))??;
+    match response {
+        crate::protocol::Response::Success { ok: true, .. } => {
+            std::fs::remove_file(path)?;
+            Ok(())
+        }
+        _ => Err(anyhow!("Could not close session window: {:?}", response)),
+    }
+}
+
+#[cfg(unix)]
+async fn ws_request(
+    state: &Arc<Mutex<SessionState>>,
+    read: &mut futures_util::stream::SplitStream<WsStream>,
+    id: &str,
+    action: &str,
+    params: Value,
+) -> Result<Value> {
+    state
+        .lock()
+        .await
+        .ws_write
+        .send(Message::Text(
+            json!({"id": id, "action": action, "params": params}).to_string(),
+        ))
+        .await?;
+    timeout(Duration::from_secs(20), async {
+        while let Some(message) = read.next().await {
+            if let Message::Text(text) = message? {
+                let response: Value = serde_json::from_str(&text)?;
+                if response["id"].as_str() == Some(id) {
+                    if response["ok"].as_bool() != Some(true) {
+                        return Err(anyhow!("{}: {}", action, response["error"]));
+                    }
+                    return Ok(response["result"].clone());
                 }
             }
         }
-        false
-    }
+        Err(anyhow!("Browser bridge disconnected"))
+    })
+    .await
+    .map_err(|_| anyhow!("Timeout waiting for {}", action))?
 }
 
 #[cfg(unix)]
@@ -89,6 +194,7 @@ struct SessionState {
     pending: std::collections::HashMap<String, mpsc::Sender<Value>>,
     counter: u64,
     session_id: Option<String>,
+    shutdown: Arc<Notify>,
 }
 
 pub async fn run(name: &str, bind_window: bool) -> Result<()> {
@@ -123,11 +229,13 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
 
         let (ws_write, mut ws_read) = ws_stream.split();
 
+        let shutdown = Arc::new(Notify::new());
         let state = Arc::new(Mutex::new(SessionState {
             ws_write,
             pending: std::collections::HashMap::new(),
             counter: 0,
             session_id: None,
+            shutdown: shutdown.clone(),
         }));
 
         // Read the ready message to get session ID
@@ -148,51 +256,51 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
             }
         }
 
-        // Optionally bind this session to a dedicated browser window so
-        // parallel agent sessions do not fight over the shared active tab.
-        let mut bound_window_id: Option<i64> = None;
+        // A crash leaves window metadata behind; rebind the existing window
+        // before creating another one. No extension UI changes are needed.
+        let mut bound_window_id = None;
         if bind_window {
-            let bind_req = json!({
-                "id": "sess_bind_window",
-                "action": "newSession",
-                "params": {
-                    "window": true,
-                    "focus": false,
-                    "url": "about:blank",
-                    "returnContent": false
-                }
-            });
-            state
-                .lock()
+            let saved = std::fs::read_to_string(window_path(name))
+                .ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+            let mut bound = None;
+            if let Some(saved) = saved {
+                if let Ok(active) = ws_request(
+                    &state,
+                    &mut ws_read,
+                    "sess_reuse_window",
+                    "getActiveTab",
+                    json!({"windowId": saved["windowId"]}),
+                )
                 .await
-                .ws_write
-                .send(Message::Text(bind_req.to_string()))
-                .await
-                .map_err(|e| anyhow!("WS send error while binding window: {}", e))?;
-            let bind_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-            while tokio::time::Instant::now() < bind_deadline {
-                let msg = match timeout(Duration::from_secs(20), ws_read.next()).await {
-                    Ok(Some(Ok(Message::Text(text)))) => text,
-                    Ok(Some(Ok(_))) => continue,
-                    _ => break,
-                };
-                if let Ok(resp) = serde_json::from_str::<Value>(&msg) {
-                    if resp.get("id").and_then(|v| v.as_str()) == Some("sess_bind_window") {
-                        bound_window_id = resp
-                            .get("result")
-                            .and_then(|r| r.get("windowId"))
-                            .and_then(|v| v.as_i64());
-                        break;
-                    }
+                {
+                    bound = ws_request(
+                        &state,
+                        &mut ws_read,
+                        "sess_reuse_tab",
+                        "setActiveTab",
+                        json!({"tabId": active["tabId"], "focus": false}),
+                    )
+                    .await
+                    .ok();
                 }
             }
-            match bound_window_id {
-                Some(win) => eprintln!("[session:{}] Bound to window {}", name, win),
-                None => eprintln!(
-                    "[session:{}] Warning: failed to bind dedicated window; continuing unbound",
-                    name
-                ),
+            let bound = match bound {
+                Some(bound) => bound,
+                None => ws_request(&state, &mut ws_read, "sess_bind_window", "newSession",
+                    json!({"window": true, "focus": false, "url": "about:blank", "returnContent": false})).await?,
+            };
+            bound_window_id = bound["windowId"].as_i64();
+            if bound_window_id.is_none() {
+                return Err(anyhow!("Missing bound window ID"));
             }
+            std::fs::write(
+                window_path(name),
+                json!({
+                    "windowId": bound["windowId"], "tabId": bound["tabId"], "wsUrl": ws_url(),
+                })
+                .to_string(),
+            )?;
         }
 
         // Write PID file
@@ -216,7 +324,7 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
 
         // Task: read WebSocket responses and dispatch to pending requests
         let state_ws = state.clone();
-        let ws_reader = tokio::spawn(async move {
+        let mut ws_reader = tokio::spawn(async move {
             while let Some(msg) = ws_read.next().await {
                 match msg {
                     Ok(Message::Text(text)) => {
@@ -249,7 +357,7 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
         // Task: accept Unix socket connections and proxy commands
         let state_accept = state.clone();
         let name_owned = name.to_string();
-        let acceptor = tokio::spawn(async move {
+        let mut acceptor = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok((stream, _)) => {
@@ -269,18 +377,27 @@ pub async fn run(name: &str, bind_window: bool) -> Result<()> {
         });
 
         // Wait for either task to finish (WebSocket disconnect or signal)
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         tokio::select! {
-            _ = ws_reader => {
+            _ = &mut ws_reader => {
                 eprintln!("[session:{}] WebSocket reader exited", name);
             }
-            _ = acceptor => {
+            _ = &mut acceptor => {
                 eprintln!("[session:{}] Acceptor exited", name);
             }
+            _ = shutdown.notified() => {}
+            _ = terminate.recv() => {}
             _ = tokio::signal::ctrl_c() => {
                 eprintln!("[session:{}] Shutting down", name);
             }
         }
 
+        acceptor.abort();
+        ws_reader.abort();
+        if let Err(error) = close_bound_window(name).await {
+            eprintln!("[session:{}] {}; preserving window for reuse", name, error);
+        }
         cleanup_socket(name);
         Ok(())
     }
@@ -301,6 +418,14 @@ async fn handle_unix_client(stream: UnixStream, state: Arc<Mutex<SessionState>>)
 
         let mut message: Value =
             serde_json::from_str(trimmed).map_err(|e| anyhow!("Invalid JSON: {}", e))?;
+
+        if message["action"].as_str() == Some("__stopSession") {
+            write_half
+                .write_all(b"{\"ok\":true,\"result\":{\"stopped\":true}}\n")
+                .await?;
+            state.lock().await.shutdown.notify_one();
+            return Ok(());
+        }
 
         let (id, rx) = {
             let mut st = state.lock().await;
@@ -412,18 +537,27 @@ pub async fn stop(name: &str) -> Result<()> {
         return Ok(());
     }
 
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let pid_path = session_pid_path(name);
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-            if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                let _ = std::process::Command::new("kill")
-                    .arg(pid.to_string())
-                    .status();
-                eprintln!("Sent SIGTERM to session '{}' (pid {})", name, pid);
+        if is_session_running(name) {
+            // Stop through the socket, never signal a PID from a stale file.
+            send_via_session(name, "__stopSession", json!({})).await?;
+            // Cleanup can spend three seconds checking the window and another
+            // three seconds closing it when the browser is unresponsive.
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+            while session_pid_path(name).exists() {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(anyhow!("Session '{}' did not stop", name));
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
             }
+            if window_path(name).exists() {
+                return Err(anyhow!("Session stopped, but its window could not be closed; metadata retained for reuse"));
+            }
+        } else {
+            close_bound_window(name).await?;
+            cleanup_socket(name);
         }
-        cleanup_socket(name);
         Ok(())
     }
 }
@@ -460,4 +594,49 @@ pub fn list() -> Result<()> {
         println!("No active browser sessions");
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_session_is_running_on_unix() {
+        let temp = tempfile::Builder::new()
+            .prefix("fab-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = temp.path().join("session.sock");
+        let pid = temp.path().join("session.pid");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        std::fs::write(&pid, std::process::id().to_string()).unwrap();
+        assert!(
+            session_is_alive(&pid, &socket),
+            "live macOS and Linux sessions must be running"
+        );
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let dead_pid = child.id();
+        child.wait().unwrap();
+        assert!(!process_is_alive(dead_pid));
+        assert!(!process_is_alive(0));
+        assert!(!process_is_alive(u32::MAX));
+        std::fs::write(&pid, dead_pid.to_string()).unwrap();
+        assert!(
+            !session_is_alive(&pid, &socket),
+            "stale dead PID must not be running"
+        );
+        std::fs::write(&pid, "not-a-pid").unwrap();
+        assert!(!session_is_alive(&pid, &socket));
+        std::fs::write(&pid, std::process::id().to_string()).unwrap();
+        drop(listener);
+        assert!(
+            !session_is_alive(&pid, &socket),
+            "socket without a listener must be dead"
+        );
+        std::fs::remove_file(&pid).unwrap();
+        assert!(
+            !session_is_alive(&pid, &socket),
+            "missing PID file must be dead"
+        );
+    }
 }

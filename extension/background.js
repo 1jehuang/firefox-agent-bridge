@@ -552,6 +552,8 @@ async function dispatchAction(action, params, profile) {
       return newSession(params);
     case "newWindow":
       return newWindow(params);
+    case "closeWindow":
+      return closeSessionWindow(params);
     case "setActiveTab":
       return setActiveTab(params);
     case "getActiveTab":
@@ -1084,6 +1086,19 @@ async function newSession(params) {
 // Create a new browser window and return its tab/window ids
 async function newWindow(params) {
   return openSessionTarget(params, { openInWindow: true, defaultFocus: true });
+}
+
+// Close only the window identified by a session's saved tab/window pair.
+async function closeSessionWindow(params) {
+  if (!Number.isInteger(params?.windowId) || !Number.isInteger(params?.tabId)) {
+    throw new Error("closeWindow requires windowId and tabId");
+  }
+  const windows = await browser.windows.getAll();
+  if (!windows.some(win => win.id === params.windowId)) return { closed: true };
+  const tab = await browser.tabs.get(params.tabId);
+  if (tab.windowId !== params.windowId) throw new Error("Session tab moved to another window");
+  await browser.windows.remove(params.windowId);
+  return { closed: true };
 }
 
 // Set which tab the agent is working on

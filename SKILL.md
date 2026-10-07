@@ -553,3 +553,12 @@ This lets multiple agents work in parallel without stepping on each other.
 4. **Element not found?** Use `browser getContent '{"format": "annotated"}'` to see what's on the page
 5. **Rich text editor not filling?** `fillForm` handles Draft.js, Lexical, TinyMCE, ProseMirror automatically
 6. **File drop not working?** `dropFile` runs in page world to bypass Firefox security restrictions
+
+### Persistent session windows
+
+`browser session start --bind-window NAME` reuses its saved window after a crash.
+`browser session stop NAME` closes that bound window and removes session files.
+If the browser is unavailable, window metadata is retained for the next start
+or stop. Persistent sessions work on macOS and Linux; Windows uses direct commands.
+The internal `closeWindow` action requires both `windowId` and the owning `tabId`;
+it refuses to close a window if that tab has moved elsewhere.
