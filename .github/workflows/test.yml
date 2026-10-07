@@ -1,0 +1,16 @@
+name: Test
+on: [push, pull_request]
+jobs:
+  sessions:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-cli
+      - run: cargo test --manifest-path rust-cli/Cargo.toml --locked
+      - run: node --test scripts/test-session-window.js

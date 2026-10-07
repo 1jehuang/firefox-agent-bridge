@@ -388,6 +388,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "libc",
  "rpassword",
  "serde",
  "serde_json",

@@ -28,10 +28,24 @@ pub struct TimedResponse {
 
 /// Send a command to Firefox via WebSocket and return the response with timing
 pub async fn send_command_timed(action: &str, params: Value) -> Result<TimedResponse> {
+    send_command_timed_to_url(&ws_url(), action, params).await
+}
+
+pub async fn send_command_to_url(url: &str, action: &str, params: Value) -> Result<Response> {
+    Ok(send_command_timed_to_url(url, action, params)
+        .await?
+        .response)
+}
+
+async fn send_command_timed_to_url(
+    url: &str,
+    action: &str,
+    params: Value,
+) -> Result<TimedResponse> {
     let start = Instant::now();
 
     // Connect to WebSocket
-    let (ws_stream, _) = connect_async(ws_url()).await.map_err(|e| {
+    let (ws_stream, _) = connect_async(url).await.map_err(|e| {
         anyhow!(
             "WebSocket error: {}\nIs Firefox running with the Browser Agent Bridge extension enabled?",
             e
