@@ -4,6 +4,10 @@
 //! 1. Runs a WebSocket server on ws://127.0.0.1:8766
 //! 2. Communicates with Firefox via native messaging (stdin/stdout)
 //! 3. Routes messages between WebSocket clients and the browser extension
+//!
+//! Relay mode (`--relay` or `FAB_TRANSPORT=relay`) replaces native messaging
+//! with a second local WebSocket that the extension dials. Safari cannot spawn
+//! arbitrary native messaging hosts, so its extension uses this transport.
 
 use std::collections::HashMap;
 use std::env;
@@ -19,6 +23,7 @@ use std::time::{Duration, Instant};
 struct ClientSession {
     id: String,
     active_tab_id: Option<i64>,
+    window_id: Option<i64>,
     forks: HashMap<String, i64>, // fork_name -> tabId
 }
 
@@ -34,20 +39,56 @@ use tokio::net::TcpListener;
 use tokio::process::Command;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
-use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::accept_hdr_async_with_config;
+use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request as HsRequest, Response as HsResponse};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
+
+#[path = "../registry.rs"]
+mod registry;
 
 /// Environment variable configuration
 fn ws_host() -> String {
     env::var("FAB_WS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
-fn ws_port() -> u16 {
-    env::var("FAB_WS_PORT")
+fn relay_port() -> u16 {
+    env::var("FAB_RELAY_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(8766)
+        .unwrap_or(8767)
+}
+
+fn relay_mode_requested() -> bool {
+    env::args().any(|a| a == "--relay")
+        || env::var("FAB_TRANSPORT").map(|v| v.eq_ignore_ascii_case("relay")).unwrap_or(false)
+}
+
+/// Origins of browser extensions allowed to act as the bridge extension over
+/// the relay socket. Web pages must never be able to impersonate it, because
+/// the extension end receives credential autofill payloads.
+fn is_extension_origin(origin: &str) -> bool {
+    let origin = origin.trim().to_ascii_lowercase();
+    ["safari-web-extension://", "chrome-extension://", "moz-extension://", "extension://"]
+        .iter()
+        .any(|prefix| origin.starts_with(prefix))
+}
+
+/// Agent clients (the `browser` CLI, jcode) connect without an Origin header.
+/// Reject connections carrying a web Origin so arbitrary pages cannot drive
+/// the browser through the local port.
+fn is_allowed_client_origin(origin: Option<&str>) -> bool {
+    match origin.map(|o| o.trim().to_ascii_lowercase()) {
+        None => true,
+        Some(o) if o.is_empty() || o == "null" => true,
+        Some(o) => is_extension_origin(&o),
+    }
+}
+
+fn forbidden(reason: &str) -> ErrorResponse {
+    let mut response = ErrorResponse::new(Some(reason.to_string()));
+    *response.status_mut() = tokio_tungstenite::tungstenite::http::StatusCode::FORBIDDEN;
+    response
 }
 
 fn request_timeout_ms() -> u64 {
@@ -144,6 +185,46 @@ macro_rules! log {
     };
 }
 
+/// Port this host actually bound (set once in `main`).
+static BOUND_PORT: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+
+fn bound_port() -> u16 {
+    BOUND_PORT.get().copied().unwrap_or(registry::DEFAULT_WS_PORT)
+}
+
+/// Record this host in the registry so clients can find it by browser.
+fn register_host(browser: Option<String>) {
+    static PARENT: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let entry = registry::HostEntry {
+        port: bound_port(),
+        pid: std::process::id(),
+        browser,
+        process: PARENT.get_or_init(registry::parent_process).clone(),
+    };
+    if let Err(e) = registry::write_entry(&entry) {
+        log!("Failed to record host in {}: {}", registry::registry_dir().display(), e);
+    }
+}
+
+fn unregister_host() {
+    if let Some(port) = BOUND_PORT.get() {
+        registry::remove_entry(*port, std::process::id());
+    }
+}
+
+/// Ports to try for the agent WebSocket. An explicit `FAB_WS_PORT` is used
+/// alone. Otherwise every browser running the extension spawns its own host,
+/// so each takes the first free port in the range instead of dying on 8766.
+fn candidate_ports() -> Vec<u16> {
+    if let Some(port) = env::var("FAB_WS_PORT").ok().and_then(|s| s.parse().ok()) {
+        return vec![port];
+    }
+    let relay = relay_port();
+    (registry::DEFAULT_WS_PORT..registry::DEFAULT_WS_PORT + registry::PORT_RANGE)
+        .filter(|port| *port != relay)
+        .collect()
+}
+
 /// Request counter for generating unique IDs
 static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -201,10 +282,6 @@ fn process_upload_file(message: &mut Value) -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("Missing filePath")?
         .to_string();
-    let selector = params.get("selector")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing selector")?
-        .to_string();
 
     let path = Path::new(&file_path);
     let file_data = std::fs::read(path)
@@ -216,17 +293,18 @@ fn process_upload_file(message: &mut Value) -> Result<(), String> {
         .to_string();
     let mime_type = get_mime_type(path);
 
-    // Convert to fillForm action
-    message["action"] = json!("fillForm");
+    // Keep as uploadFile action so content.js handleUploadFile receives it
+    let selector = params.get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("input[type=\"file\"]")
+        .to_string();
     message["params"] = json!({
-        "fields": [{
-            "selector": selector,
-            "file": {
-                "name": file_name,
-                "type": mime_type,
-                "data": base64_data
-            }
-        }]
+        "selector": selector,
+        "file": {
+            "name": file_name,
+            "type": mime_type,
+            "data": base64_data
+        }
     });
 
     Ok(())
@@ -720,6 +798,7 @@ async fn handle_ws_client(
     let mut session = ClientSession {
         id: session_id.clone(),
         active_tab_id: None,
+        window_id: None,
         forks: HashMap::new(),
     };
     log!("Session {} connected", session.id);
@@ -729,7 +808,15 @@ async fn handle_ws_client(
         max_frame_size: Some(64 * 1024 * 1024),
         ..Default::default()
     };
-    let ws_stream = match accept_async_with_config(stream, Some(ws_config)).await {
+    let check_origin = |req: &HsRequest, resp: HsResponse| -> Result<HsResponse, ErrorResponse> {
+        let origin = req.headers().get("origin").and_then(|v| v.to_str().ok());
+        if is_allowed_client_origin(origin) {
+            Ok(resp)
+        } else {
+            Err(forbidden("web origins may not control the browser bridge"))
+        }
+    };
+    let ws_stream = match accept_hdr_async_with_config(stream, check_origin, Some(ws_config)).await {
         Ok(ws) => ws,
         Err(e) => {
             log!("WebSocket handshake error: {}", e);
@@ -743,7 +830,7 @@ async fn handle_ws_client(
     let ready_msg = json!({
         "type": "ready",
         "host": ws_host(),
-        "port": ws_port(),
+        "port": bound_port(),
         "sessionId": session.id
     });
     if let Err(e) = write.send(Message::Text(ready_msg.to_string())).await {
@@ -778,6 +865,7 @@ async fn handle_ws_client(
                     "type": "session_info",
                     "sessionId": session.id,
                     "activeTabId": session.active_tab_id,
+                    "windowId": session.window_id,
                     "forks": session.forks.keys().collect::<Vec<_>>()
                 });
                 let _ = write.send(Message::Text(info.to_string())).await;
@@ -802,8 +890,9 @@ async fn handle_ws_client(
 
         let action = message.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-        // Session-scoped tab injection: if the message doesn't have an explicit
-        // tabId and the action needs a tab, inject the session's active tab.
+        // Session-scoped tab/window injection: if the message doesn't have an
+        // explicit tabId and the action needs a tab, inject the session's active
+        // tab (and window scope for isolation between parallel sessions).
         if action_needs_tab(&action) {
             let has_explicit_tab = message.get("params")
                 .and_then(|p| p.get("tabId"))
@@ -815,6 +904,30 @@ async fn handle_ws_client(
                         params["tabId"] = json!(tab_id);
                     } else {
                         message["params"] = json!({"tabId": tab_id});
+                    }
+                } else if let Some(window_id) = session.window_id {
+                    if let Some(params) = message.get_mut("params") {
+                        params["windowId"] = json!(window_id);
+                    } else {
+                        message["params"] = json!({"windowId": window_id});
+                    }
+                }
+            }
+        }
+
+        // Window-scoped listing/creation: scope listTabs/newSession/navigate
+        // newTab to the session's window when no explicit target was given.
+        if matches!(action.as_str(), "listTabs" | "newSession" | "getActiveTab" | "navigate") {
+            let has_explicit_window = message.get("params")
+                .and_then(|p| p.get("windowId"))
+                .and_then(|v| v.as_i64())
+                .is_some();
+            if !has_explicit_window {
+                if let Some(window_id) = session.window_id {
+                    if let Some(params) = message.get_mut("params") {
+                        params["windowId"] = json!(window_id);
+                    } else {
+                        message["params"] = json!({"windowId": window_id});
                     }
                 }
             }
@@ -848,12 +961,14 @@ async fn handle_ws_client(
             continue;
         }
 
-        // Handle uploadFile action
+        // Handle uploadFile action (only if filePath is present, meaning CLI hasn't processed it yet)
         if message.get("action").and_then(|v| v.as_str()) == Some("uploadFile") {
-            if let Err(e) = process_upload_file(&mut message) {
-                let error_msg = json!({"id": id, "ok": false, "error": e});
-                let _ = write.send(Message::Text(error_msg.to_string())).await;
-                continue;
+            if message.get("params").and_then(|p| p.get("filePath")).is_some() {
+                if let Err(e) = process_upload_file(&mut message) {
+                    let error_msg = json!({"id": id, "ok": false, "error": e});
+                    let _ = write.send(Message::Text(error_msg.to_string())).await;
+                    continue;
+                }
             }
         }
 
@@ -999,10 +1114,13 @@ async fn handle_ws_client(
         let resp_ok = response.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
         if resp_ok {
             if let Some(result) = response.get("result") {
-                // Track tabId from navigate, newSession, setActiveTab responses
-                if matches!(action.as_str(), "navigate" | "newSession" | "setActiveTab") {
+                // Track tabId from navigate, newSession, newWindow, setActiveTab responses
+                if matches!(action.as_str(), "navigate" | "newSession" | "newWindow" | "setActiveTab") {
                     if let Some(tab_id) = result.get("tabId").and_then(|v| v.as_i64()) {
                         session.active_tab_id = Some(tab_id);
+                    }
+                    if let Some(window_id) = result.get("windowId").and_then(|v| v.as_i64()) {
+                        session.window_id = Some(window_id);
                     }
                 }
                 // Track forks created by this session
@@ -1103,6 +1221,73 @@ fn write_native_stdout(message: &Value) {
     }
 }
 
+/// The currently connected relay extension, if any.
+type ExtensionSink = Arc<RwLock<Option<mpsc::Sender<String>>>>;
+
+/// Accept the browser extension over the relay WebSocket. The most recent
+/// extension connection wins, matching native messaging's single port.
+async fn handle_extension_relay(
+    stream: tokio::net::TcpStream,
+    native_in_tx: mpsc::Sender<Value>,
+    extension: ExtensionSink,
+) {
+    let ws_config = WebSocketConfig {
+        max_message_size: Some(128 * 1024 * 1024),
+        max_frame_size: Some(64 * 1024 * 1024),
+        ..Default::default()
+    };
+    let check_origin = |req: &HsRequest, resp: HsResponse| -> Result<HsResponse, ErrorResponse> {
+        let origin = req.headers().get("origin").and_then(|v| v.to_str().ok()).unwrap_or("");
+        if is_extension_origin(origin) {
+            Ok(resp)
+        } else {
+            Err(forbidden("only the Browser Agent Bridge extension may use the relay"))
+        }
+    };
+    let ws = match accept_hdr_async_with_config(stream, check_origin, Some(ws_config)).await {
+        Ok(ws) => ws,
+        Err(e) => {
+            log!("Relay handshake rejected: {}", e);
+            return;
+        }
+    };
+    log!("Browser extension connected over relay");
+    let (mut write, mut read) = ws.split();
+    let (tx, mut rx) = mpsc::channel::<String>(100);
+    *extension.write().await = Some(tx.clone());
+    let writer = tokio::spawn(async move {
+        while let Some(text) = rx.recv().await {
+            if write.send(Message::Text(text)).await.is_err() {
+                break;
+            }
+        }
+    });
+    while let Some(msg) = read.next().await {
+        match msg {
+            Ok(Message::Text(text)) => match serde_json::from_str::<Value>(&text) {
+                Ok(value) => {
+                    if native_in_tx.send(value).await.is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    log!("Bad relay message: {}", e);
+                }
+            },
+            Ok(Message::Close(_)) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
+    {
+        let mut guard = extension.write().await;
+        if guard.as_ref().is_some_and(|current| current.same_channel(&tx)) {
+            *guard = None;
+        }
+    }
+    writer.abort();
+    log!("Browser extension relay disconnected");
+}
+
 /// Process messages from the browser extension
 async fn handle_native_messages(
     mut native_rx: mpsc::Receiver<Value>,
@@ -1131,6 +1316,13 @@ async fn handle_native_messages(
             }
         }
 
+        // The extension announces which browser it runs in; record it so
+        // clients asking for that browser find this host.
+        if message.get("type").and_then(|v| v.as_str()) == Some("hello") {
+            let browser = message.get("browser").and_then(|v| v.as_str()).map(str::to_string);
+            register_host(browser);
+        }
+
         // Not a response - this is an event, broadcast to all clients
         // (For now we just log it, as we don't track all connected clients for broadcasting)
         log!("Received event from browser: {}", message);
@@ -1140,8 +1332,6 @@ async fn handle_native_messages(
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     let host = ws_host();
-    let port = ws_port();
-    let addr = format!("{}:{}", host, port);
 
     // Try to unlock the bronzewarden vault at startup
     let vault: SharedVault = Arc::new(RwLock::new(None));
@@ -1164,19 +1354,64 @@ async fn main() {
     // Create channel for incoming native messages
     let (native_in_tx, native_in_rx) = mpsc::channel::<Value>(100);
 
-    // Spawn thread for reading native stdin (blocking I/O)
-    let stdin_tx = native_in_tx.clone();
-    std::thread::spawn(move || {
-        read_native_stdin(stdin_tx);
-        std::process::exit(0);
-    });
+    if relay_mode_requested() {
+        let relay_addr = format!("{}:{}", host, relay_port());
+        let relay_listener = match TcpListener::bind(&relay_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                log!("Failed to bind relay {}: {}", relay_addr, e);
+                std::process::exit(1);
+            }
+        };
+        log!("Extension relay listening on ws://{}/extension", relay_addr);
+        let extension_tx: ExtensionSink = Arc::new(RwLock::new(None));
+        let sink_for_writer = extension_tx.clone();
+        tokio::spawn(async move {
+            while let Some(message) = native_out_rx.recv().await {
+                let sender = sink_for_writer.read().await.clone();
+                match sender {
+                    Some(tx) => {
+                        let _ = tx.send(message.to_string()).await;
+                    }
+                    None => {
+                        log!("Dropping message: no browser extension connected to relay");
+                    }
+                }
+            }
+        });
+        let relay_in_tx = native_in_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match relay_listener.accept().await {
+                    Ok((stream, _)) => {
+                        tokio::spawn(handle_extension_relay(
+                            stream,
+                            relay_in_tx.clone(),
+                            extension_tx.clone(),
+                        ));
+                    }
+                    Err(e) => {
+                        log!("Relay accept failed: {}", e);
+                    }
+                }
+            }
+        });
+    } else {
+        // Spawn thread for reading native stdin (blocking I/O)
+        let stdin_tx = native_in_tx.clone();
+        std::thread::spawn(move || {
+            read_native_stdin(stdin_tx);
+            unregister_host();
+            std::process::exit(0);
+        });
 
-    // Spawn task for writing to native stdout
-    tokio::spawn(async move {
-        while let Some(message) = native_out_rx.recv().await {
-            write_native_stdout(&message);
-        }
-    });
+        // Spawn task for writing to native stdout
+        tokio::spawn(async move {
+            while let Some(message) = native_out_rx.recv().await {
+                write_native_stdout(&message);
+            }
+        });
+    }
 
     // Spawn task for handling incoming native messages
     let pending_clone = pending.clone();
@@ -1184,16 +1419,37 @@ async fn main() {
         handle_native_messages(native_in_rx, pending_clone).await;
     });
 
-    // Start WebSocket server
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(l) => l,
-        Err(e) => {
-            log!("Failed to bind to {}: {}", addr, e);
-            std::process::exit(1);
+    // Start WebSocket server on the first free candidate port.
+    let mut bound = None;
+    let mut last_error = None;
+    for port in candidate_ports() {
+        match TcpListener::bind(format!("{}:{}", host, port)).await {
+            Ok(listener) => {
+                bound = Some((listener, port));
+                break;
+            }
+            Err(e) => last_error = Some(format!("{}:{}: {}", host, port, e)),
         }
+    }
+    let Some((listener, port)) = bound else {
+        log!(
+            "Failed to bind the agent WebSocket ({}). Every port in {}..{} is in use; set FAB_WS_PORT to a free port.",
+            last_error.unwrap_or_default(),
+            registry::DEFAULT_WS_PORT,
+            registry::DEFAULT_WS_PORT + registry::PORT_RANGE - 1
+        );
+        std::process::exit(1);
     };
+    let _ = BOUND_PORT.set(port);
+    register_host(None);
+    tokio::spawn(async {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            unregister_host();
+            std::process::exit(0);
+        }
+    });
 
-    log!("WebSocket server listening on ws://{}", addr);
+    log!("WebSocket server listening on ws://{}:{}", host, port);
 
     loop {
         match listener.accept().await {
@@ -1209,5 +1465,26 @@ async fn main() {
                 log!("Failed to accept connection: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    #[test]
+    fn relay_accepts_only_extension_origins() {
+        assert!(is_extension_origin("safari-web-extension://ABC"));
+        assert!(is_extension_origin("chrome-extension://ijifgeepmnbalajhfjnpbnobfobflfkk"));
+        assert!(!is_extension_origin("https://evil.example"));
+        assert!(!is_extension_origin(""));
+    }
+
+    #[test]
+    fn client_port_rejects_web_origins() {
+        assert!(is_allowed_client_origin(None));
+        assert!(is_allowed_client_origin(Some("null")));
+        assert!(!is_allowed_client_origin(Some("https://evil.example")));
+        assert!(!is_allowed_client_origin(Some("http://localhost:3000")));
     }
 }

@@ -1,4 +1,10 @@
 /* eslint-env browser */
+// Cross-browser shim: Chromium exposes chrome.* (promise-based in MV3), while
+// Firefox and Safari expose browser.*.
+if (typeof globalThis.browser === "undefined" && typeof globalThis.chrome !== "undefined") {
+  globalThis.browser = globalThis.chrome;
+}
+const FAB_IS_GECKO = typeof window.wrappedJSObject !== "undefined";
 function roundMs(value) {
   return Math.round(value * 100) / 100;
 }
@@ -8,7 +14,7 @@ function runInPageWorld(code) {
     try {
       const pageWin = window.wrappedJSObject;
       if (!pageWin) {
-        resolve({ ok: false, error: 'no wrappedJSObject' });
+        runInPageWorldViaScriptElement(code).then(resolve);
         return;
       }
       const wrapped = '(function(){' + code + '})()';
@@ -46,6 +52,37 @@ function runInPageWorld(code) {
   });
 }
 
+// Page-world evaluation for browsers without Firefox Xray wrappers (Chromium,
+// Safari). Injects an inline <script>, which is subject to the page CSP, and
+// passes the serialized result back through a DOM CustomEvent.
+function runInPageWorldViaScriptElement(code) {
+  return new Promise((resolve) => {
+    const eventName = '__fab_result_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener(eventName, onResult);
+      resolve(value);
+    };
+    const onResult = (event) => {
+      try { finish(JSON.parse(event.detail)); } catch (e) { finish({ ok: false, error: 'Unparseable page-world result' }); }
+    };
+    document.addEventListener(eventName, onResult);
+    const source = '(function(){' +
+      'var emit=function(v){document.dispatchEvent(new CustomEvent(' + JSON.stringify(eventName) + ',{detail:JSON.stringify(v)}));};' +
+      'var ser=function(r){if(r===undefined)return null;try{return JSON.parse(JSON.stringify(r));}catch(e){return String(r);}};' +
+      'try{Promise.resolve((function(){' + code + '\n})()).then(function(r){emit({ok:true,value:ser(r)});},function(e){emit({ok:false,error:(e&&e.message)||String(e)});});}' +
+      'catch(e){emit({ok:false,error:(e&&e.message)||String(e)});}' +
+      '})();';
+    const script = document.createElement('script');
+    script.textContent = source;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+    setTimeout(() => finish({ ok: false, error: 'Page-world script did not run (blocked by the page Content-Security-Policy?)' }), 3000);
+  });
+}
+
 function simulateEnterKey(el) {
   const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
   el.dispatchEvent(new KeyboardEvent('keydown', opts));
@@ -57,8 +94,13 @@ function simulateEnterKey(el) {
 
 function contentEditableInsertText(el, text, clear) {
   try {
-    const pageWin = window.wrappedJSObject;
-    if (!pageWin) return { ok: false, error: 'no wrappedJSObject' };
+    // Firefox needs page-world objects (Xray wrappers hide content-script
+    // events from page frameworks). Chromium and Safari share DOM event objects
+    // across worlds, so the content-script window works directly.
+    const pageWin = window.wrappedJSObject || window;
+    const cloneInto = typeof globalThis.cloneInto === 'function'
+      ? globalThis.cloneInto
+      : (value) => value;
     el.focus();
     const sel = window.getSelection();
 
@@ -169,6 +211,90 @@ function textIncludes(haystack, needleLower) {
   return haystack && needleLower && haystack.toLowerCase().includes(needleLower);
 }
 
+function normalizeText(text) {
+  return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function escapeCssAttrValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function collectUniqueText(texts, maxLen = 200) {
+  const seen = new Set();
+  const result = [];
+  for (const text of texts || []) {
+    const trimmed = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed.slice(0, maxLen));
+  }
+  return result;
+}
+
+function findAssociatedLabelText(el) {
+  if (!el || !el.tagName) return [];
+  const texts = [];
+  if (el.labels && el.labels.length) {
+    for (const label of el.labels) {
+      texts.push(label.innerText || label.textContent || '');
+    }
+  }
+  if (el.id) {
+    const explicitLabel = document.querySelector(`label[for="${escapeCssAttrValue(el.id)}"]`);
+    if (explicitLabel) texts.push(explicitLabel.innerText || explicitLabel.textContent || '');
+  }
+  const closestLabel = el.closest ? el.closest('label') : null;
+  if (closestLabel) texts.push(closestLabel.innerText || closestLabel.textContent || '');
+  if (el.nextElementSibling) texts.push(el.nextElementSibling.innerText || el.nextElementSibling.textContent || '');
+  if (el.previousElementSibling) texts.push(el.previousElementSibling.innerText || el.previousElementSibling.textContent || '');
+  if (el.parentElement) texts.push(el.parentElement.innerText || el.parentElement.textContent || '');
+  return collectUniqueText(texts, 120);
+}
+
+function collectElementTextCandidates(el) {
+  if (!el) return [];
+  const texts = [
+    el.innerText,
+    el.textContent,
+    el.value,
+    el.getAttribute && el.getAttribute('aria-label'),
+    el.getAttribute && el.getAttribute('placeholder'),
+    el.getAttribute && el.getAttribute('title'),
+    el.getAttribute && el.getAttribute('alt'),
+  ];
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+    texts.push(...findAssociatedLabelText(el));
+  }
+  return collectUniqueText(texts, 200);
+}
+
+function textMatchScore(candidateText, queryText) {
+  const candidate = normalizeText(candidateText);
+  const query = normalizeText(queryText);
+  if (!candidate || !query) return -1;
+  if (candidate === query) return 100;
+  if (candidate.startsWith(`${query} `) || candidate.endsWith(` ${query}`) || candidate.includes(` ${query} `)) {
+    return 90;
+  }
+  if (query.length >= 5 && candidate.includes(query)) return 70;
+  return -1;
+}
+
+function resolveTextTarget(el) {
+  if (!el) return null;
+  if (el.tagName === 'LABEL') return el;
+  if (el.closest) {
+    const label = el.closest('label');
+    if (label) return label;
+  }
+  if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) return el;
+  const clickable = findClickableParent(el, 6);
+  if (clickable) return clickable;
+  return el;
+}
+
 function isElementVisible(el) {
   if (!el) return false;
   const rect = el.getBoundingClientRect();
@@ -184,78 +310,147 @@ function isElementVisible(el) {
 
 function findByText(text) {
   if (!text) return null;
-  const needleLower = text.toLowerCase();
   const root = document.body || document.documentElement;
   if (!root) return null;
-  let fallback = null;
+
+  let best = null;
+  let bestScore = -1;
+
+  function consider(el, sourceText = null) {
+    const target = resolveTextTarget(el);
+    if (!target || !isElementVisible(target)) return;
+    const candidateTexts = sourceText ? [sourceText, ...collectElementTextCandidates(target)] : collectElementTextCandidates(target);
+    let score = -1;
+    for (const candidateText of candidateTexts) {
+      score = Math.max(score, textMatchScore(candidateText, text));
+    }
+    if (score < 0) return;
+    if (isInteractable(target) || target.tagName === 'LABEL') score += 5;
+    if (target === el) score += 1;
+    if (score > bestScore) {
+      best = target;
+      bestScore = score;
+    }
+  }
+
+  const preferred = root.querySelectorAll('label, button, a, [role="button"], [onclick], input:not([type="hidden"]), textarea, select, [aria-label], [contenteditable="true"]');
+  for (const el of preferred) {
+    consider(el);
+  }
+
   function walkNode(node) {
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
     let textNode = walker.nextNode();
     while (textNode) {
-      if (textIncludes(textNode.nodeValue, needleLower)) {
+      if (textIncludes(textNode.nodeValue, normalizeText(text))) {
         const el = textNode.parentElement || textNode.parentNode;
-        if (isElementVisible(el)) return el;
-        if (!fallback) fallback = el;
+        if (el) consider(el, textNode.nodeValue);
       }
       textNode = walker.nextNode();
     }
     const allEls = node.querySelectorAll('*');
     for (const el of allEls) {
-      if (el.shadowRoot) {
-        const found = walkNode(el.shadowRoot);
-        if (found) return found;
-      }
+      if (el.shadowRoot) walkNode(el.shadowRoot);
     }
-    return null;
   }
-  return walkNode(root) || fallback;
+
+  walkNode(root);
+  return best;
 }
 
-function resolveElement(params) {
+function summarizeElementCandidate(el, matchedBy) {
+  return {
+    matchedBy,
+    selector: getSelector(el),
+    ...elementSummary(el)
+  };
+}
+
+function collectFallbackCandidates(root, selector) {
+  const candidates = [];
+  const seen = new Set();
+
+  for (const fb of generateSelectorFallbacks(selector)) {
+    try {
+      const directMatches = Array.from(root.querySelectorAll(fb));
+      for (const el of directMatches) {
+        if (!seen.has(el)) {
+          seen.add(el);
+          candidates.push(summarizeElementCandidate(el, fb));
+        }
+      }
+
+      const deepMatches = querySelectorDeep(root, fb, { preferVisible: false, all: true }) || [];
+      for (const el of deepMatches) {
+        if (!seen.has(el)) {
+          seen.add(el);
+          candidates.push(summarizeElementCandidate(el, fb));
+        }
+      }
+    } catch (e) {}
+  }
+
+  const textMatch = selector.match(/["']([^"']+)["']/);
+  if (textMatch) {
+    const el = findByText(textMatch[1]);
+    if (el && !seen.has(el)) {
+      candidates.push(summarizeElementCandidate(el, `text:${textMatch[1]}`));
+    }
+  }
+
+  candidates.sort((a, b) => {
+    const av = a.rect && a.rect.width > 0 && a.rect.height > 0 ? 1 : 0;
+    const bv = b.rect && b.rect.width > 0 && b.rect.height > 0 ? 1 : 0;
+    return bv - av;
+  });
+
+  return candidates.slice(0, 8);
+}
+
+function resolveElementDetailed(params) {
   const root = document;
   if (params.selector) {
     const el = root.querySelector(params.selector);
     if (el) {
-      if (!params._preferVisible) return el;
+      if (!params._preferVisible) return { element: el, matchType: "selector" };
       const all = root.querySelectorAll(params.selector);
-      if (all.length <= 1) return el;
+      if (all.length <= 1) return { element: el, matchType: "selector" };
       for (const candidate of all) {
-        if (isElementVisible(candidate)) return candidate;
+        if (isElementVisible(candidate)) return { element: candidate, matchType: "selector" };
       }
-      return el;
+      return { element: el, matchType: "selector" };
     }
     const deep = querySelectorDeep(root, params.selector, { preferVisible: true });
-    if (deep) return deep;
+    if (deep) return { element: deep, matchType: "selector" };
   }
 
   if (params.text) {
     const el = findByText(params.text);
-    if (el) return el;
+    if (el) return { element: el, matchType: "text" };
   }
 
   if (Number.isFinite(params.x) && Number.isFinite(params.y)) {
-    return document.elementFromPoint(params.x, params.y);
+    const el = document.elementFromPoint(params.x, params.y);
+    if (el) return { element: el, matchType: "coordinates" };
   }
 
   if (params.selector && params.smartFallback !== false) {
-    const fallbacks = generateSelectorFallbacks(params.selector);
-    for (const fb of fallbacks) {
-      try {
-        const el = root.querySelector(fb);
-        if (el) return el;
-        const deep = querySelectorDeep(root, fb, { preferVisible: true });
-        if (deep) return deep;
-      } catch (e) {}
-    }
-
-    const textMatch = params.selector.match(/["']([^"']+)["']/);
-    if (textMatch) {
-      const el = findByText(textMatch[1]);
-      if (el) return el;
+    const fallbackCandidates = collectFallbackCandidates(root, params.selector);
+    if (fallbackCandidates.length > 0) {
+      return {
+        element: null,
+        matchType: "fallback",
+        fallbackRequestedFor: params.selector,
+        fallbackCandidates,
+      };
     }
   }
 
-  return null;
+  return { element: null, matchType: "none" };
+}
+
+function resolveElement(params) {
+  return resolveElementDetailed(params).element;
 }
 
 function generateSelectorFallbacks(selector) {
@@ -313,7 +508,18 @@ function elementSummary(el) {
 }
 
 async function handleClick(params) {
-  const target = resolveElement(params || {});
+  const resolved = resolveElementDetailed(params || {});
+  if (resolved.matchType === "fallback") {
+    return {
+      clicked: false,
+      requiresDisambiguation: true,
+      reason: `Exact selector not found: ${resolved.fallbackRequestedFor}`,
+      requestedSelector: resolved.fallbackRequestedFor,
+      fallbackCandidates: resolved.fallbackCandidates,
+    };
+  }
+
+  const target = resolved.element;
   if (!target) throw new Error("Element not found");
   if (params.scrollIntoView !== false && target.scrollIntoView) {
     target.scrollIntoView({ block: "center", inline: "center" });
@@ -346,9 +552,16 @@ async function handleClick(params) {
     target.dispatchEvent(new MouseEvent("mouseover", eventInit));
     target.dispatchEvent(new MouseEvent("mousedown", eventInit));
     target.dispatchEvent(new MouseEvent("mouseup", eventInit));
-    target.dispatchEvent(new MouseEvent("click", eventInit));
-  }
-  if (typeof target.click === "function") target.click();
+    }
+  // Exactly one activation. click() fires the click event and runs the default
+// action; a target without click() (e.g. SVGElement, MathMLElement) still needs
+// the explicit event, and only when dispatchEvents was not disabled.
+if (typeof target.click === "function") {
+  target.click();
+} else if (params.dispatchEvents !== false) {
+  const clickInit = { bubbles: true, cancelable: true, view: window };
+  target.dispatchEvent(new MouseEvent("click", clickInit));
+}
 
   return { clicked: true, element: elementSummary(target) };
 }
@@ -437,7 +650,18 @@ function setInputValueReact(el, value) {
 
 async function handleType(params) {
   if (!params || !params.text) throw new Error("Missing text parameter");
-  let target = resolveElement({ ...params, _preferVisible: true });
+  const resolved = resolveElementDetailed({ ...params, _preferVisible: true });
+  if (resolved.matchType === "fallback") {
+    return {
+      typed: false,
+      requiresDisambiguation: true,
+      reason: `Exact selector not found: ${resolved.fallbackRequestedFor}`,
+      requestedSelector: resolved.fallbackRequestedFor,
+      fallbackCandidates: resolved.fallbackCandidates,
+    };
+  }
+
+  let target = resolved.element;
   if (!target) throw new Error("Element not found");
 
   // If target is a custom element with shadow DOM, find the actual editable inside
@@ -1039,18 +1263,16 @@ async function handleGetInteractables(params) {
   const seen = new Set();
 
   // Find clickable elements
-  const clickables = root.querySelectorAll('button, a, [role="button"], [onclick], input[type="submit"], input[type="button"]');
+  const clickables = root.querySelectorAll('button, a, label, [role="button"], [onclick], input[type="submit"], input[type="button"]');
   clickables.forEach((el, i) => {
-    if (i > 50) return; // Limit
-    const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 100);
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-
-    const selector = el.id ? `#${el.id}` :
-                     el.className ? `${el.tagName.toLowerCase()}.${el.className.split(' ')[0]}` :
-                     null;
-
+    if (i > 50 || !isElementVisible(el)) return;
+    const text = (collectElementTextCandidates(el)[0] || '').slice(0, 100);
+    const selector = getSelector(el);
     const rect = el.getBoundingClientRect();
+    const key = `${selector || el.tagName}:${text}:${Math.round(rect.x)}:${Math.round(rect.y)}`;
+    if (!text || seen.has(key)) return;
+    seen.add(key);
+
     interactables.push({
       type: 'clickable',
       tag: el.tagName,
@@ -1063,9 +1285,10 @@ async function handleGetInteractables(params) {
   // Find input fields
   const inputs = root.querySelectorAll('input:not([type="hidden"]), textarea, select');
   inputs.forEach((el, i) => {
-    if (i > 30) return;
+    if (i > 50 || !isElementVisible(el)) return;
     const name = el.name || el.id || el.placeholder || '';
-    const label = el.labels?.[0]?.innerText || el.getAttribute('aria-label') || '';
+    const label = (collectElementTextCandidates(el)[0] || name || '').slice(0, 100);
+    const rect = el.getBoundingClientRect();
 
     interactables.push({
       type: 'input',
@@ -1073,8 +1296,11 @@ async function handleGetInteractables(params) {
       inputType: el.type || 'text',
       name,
       label: label.slice(0, 50),
-      selector: el.id ? `#${el.id}` : el.name ? `[name="${el.name}"]` : null,
-      value: el.value?.slice(0, 50) || ''
+      text: label,
+      selector: getSelector(el),
+      value: el.value?.slice(0, 50) || '',
+      checked: typeof el.checked === 'boolean' ? el.checked : undefined,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     });
   });
 
@@ -1277,8 +1503,20 @@ async function handleEvaluate(params) {
     return { result: result.value, type: typeof result.value, pageWorld: true };
   }
 
+  let fn;
   try {
-    const fn = new Function(params.script);
+    fn = new Function(params.script);
+  } catch (err) {
+    if (err instanceof EvalError || /unsafe-eval|Content Security Policy/i.test(String(err && err.message))) {
+      // Extension CSP forbids eval in this browser's isolated world; run in the page instead.
+      const result = await runInPageWorld(params.script);
+      if (!result.ok) throw new Error(result.error || 'Page world eval failed');
+      return { result: result.value, type: typeof result.value, pageWorld: true };
+    }
+    throw new Error(`Evaluate error: ${err.message}`);
+  }
+
+  try {
     const result = fn();
 
     // Handle promises
@@ -1656,7 +1894,7 @@ async function handleSecureAutoFill(params) {
   return filled;
 }
 
-browser.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.type !== "agent-bridge") return undefined;
   const params = message.params || {};
   const profile = Boolean(message.profile || params.profile);
@@ -1698,7 +1936,7 @@ browser.runtime.onMessage.addListener((message) => {
     }
   };
 
-  return run().then((result) => {
+  const response = run().then((result) => {
     if (!profile) return result;
     const timing = { contentMs: roundMs(performance.now() - started) };
     if (result && typeof result === "object") {
@@ -1707,4 +1945,15 @@ browser.runtime.onMessage.addListener((message) => {
     }
     return { value: result, __timing: timing };
   });
+
+  if (FAB_IS_GECKO) return response;
+
+  // Chromium (and Safari) do not accept a returned Promise from onMessage.
+  // Reply through sendResponse and encode thrown errors so the background can
+  // re-throw them with the original message.
+  response.then(
+    (result) => sendResponse(result === undefined ? null : result),
+    (err) => sendResponse({ __bridgeError: (err && err.message) || String(err) })
+  );
+  return true;
 });

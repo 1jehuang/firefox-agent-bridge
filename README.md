@@ -1,6 +1,24 @@
 # Firefox Agent Bridge
 
-Bridge a WebSocket-connected AI agent to a live Firefox profile via a WebExtension and native messaging host.
+Bridge a WebSocket-connected AI agent to your real, logged-in browser via a WebExtension and a
+native host. One extension source tree ships to **Firefox**, **Chrome/Chromium-family browsers**
+(Chrome, Edge, Brave, Chromium) and **Safari**.
+
+| Browser | Package | Transport |
+|---------|---------|-----------|
+| Firefox | MV2 `.xpi` | native messaging |
+| Chrome, Edge, Brave, Chromium | MV3 (`dist/chrome`, stable ID `ijifgeepmnbalajhfjnpbnobfobflfkk`) | native messaging |
+| Safari 17+ (macOS) | MV3 wrapped in an app by `scripts/package-safari.sh` | local WebSocket relay (`host --relay`, port 8767) |
+
+Build all packages with `python3 scripts/build-extensions.py` (outputs to `dist/`).
+
+Chromium notes: `evaluate` runs in the page's main world. On pages whose CSP forbids eval it
+uses the `userScripts` world when "Allow user scripts" is enabled for the extension, otherwise it
+falls back to a short-lived `chrome.debugger` attach.
+
+Safari cannot launch arbitrary native messaging hosts, so the host runs in relay mode and the
+extension dials `ws://127.0.0.1:8767/extension`. Both host sockets reject connections that carry a
+web page `Origin`, so websites cannot drive the browser.
 
 ## Architecture
 
@@ -19,7 +37,19 @@ The entire bridge is written in Rust except for the browser extension (browsers 
 
 ## Installation
 
-### 1. Install the Firefox Extension
+### 1. Install the Browser Extension
+
+`jcode browser setup` detects your default browser and does all of this for you. Manual steps:
+
+**Chrome / Edge / Brave / Chromium:** unzip `browser-agent-bridge-chrome-X.X.X.zip`, open
+`chrome://extensions`, enable Developer mode, then "Load unpacked". Register the native host with
+`allowed_origins: ["chrome-extension://ijifgeepmnbalajhfjnpbnobfobflfkk/"]` in the browser's
+`NativeMessagingHosts` directory.
+
+**Safari:** run `scripts/package-safari.sh` on a Mac with Xcode, open the built app once, and enable
+the extension in Safari > Settings > Extensions. Start the host with `firefox-agent-bridge-host --relay`.
+
+**Firefox:**
 
 Download the signed extension from [GitHub Releases](https://github.com/1jehuang/firefox-agent-bridge/releases/latest):
 

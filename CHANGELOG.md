@@ -13,6 +13,21 @@
 
 ## Version History
 
+### v0.10.1 (2026-10-05)
+**Several browsers at once:**
+- Each browser's native host binds the first free port in 8766-8775 instead of exiting when 8766 is taken (1jehuang/jcode#1720)
+- Hosts record port, browser and spawning executable in `$XDG_RUNTIME_DIR/browser-agent-bridge/`
+- `FAB_BROWSER` picks which browser's host the CLI talks to, including Chromium forks such as Helium
+
+### v0.10.0 (2026-09-22)
+**Multi-browser support:**
+- Chrome, Edge, Brave and Chromium via an MV3 build with a stable extension ID
+- Safari via an MV3 build plus a new WebSocket relay transport (`host --relay`)
+- `scripts/build-extensions.py` emits Firefox, Chrome and Safari packages from one source tree
+- `ping` now reports `browser`, `transport` and `extensionVersion`
+- Host rejects WebSocket connections carrying a web page Origin
+- CLI honours `FAB_WS_PORT` / `FAB_WS_URL`
+
 ### v0.8.0 (2026-01-25)
 **Architecture:**
 - **Rust native host** - Replaced Node.js `host.js` with Rust binary (830KB)

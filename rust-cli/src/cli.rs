@@ -81,6 +81,11 @@ pub enum SessionAction {
         /// Session name (used to identify the session socket)
         #[arg(default_value = "default")]
         name: String,
+
+        /// Bind the session to a dedicated new browser window so parallel
+        /// sessions do not fight over the active tab
+        #[arg(long)]
+        bind_window: bool,
     },
 
     /// Stop a running session

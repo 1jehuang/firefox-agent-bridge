@@ -19,7 +19,7 @@ COMMANDS:
   --version         Show version
 
 ACTIONS:
-  Session:     listTabs, newSession, setActiveTab, getActiveTab
+  Session:     listTabs, newSession, newWindow, setActiveTab, getActiveTab
   Navigation:  navigate, getContent, getInteractables, screenshot
   Interaction: click, type, fillForm, waitFor
   Control:     fork, killFork, listForks, tryUntil, parallel
@@ -29,13 +29,14 @@ ACTIONS:
 EXAMPLES:
   browser ping
   browser newSession '{{"url": "https://example.com"}}'
+  browser newWindow '{{"url": "https://example.com"}}'
   browser click '{{"selector": "#btn"}}'
   browser getContent '{{"format": "annotated"}}'
 
 QUICK START:
   1. Install Firefox extension from extension/ folder
   2. browser ping                    # verify connection
-  3. browser newSession '{{"url": "https://google.com"}}'
+  3. browser newWindow '{{"url": "https://google.com"}}'
   4. browser click '{{"text": "Sign in"}}'
 "##,
         VERSION
@@ -55,6 +56,10 @@ Control Firefox browser via WebSocket. Uses real browser with existing logins.
 - listTabs          List all open tabs
 - newSession        Create new tab (returns content by default)
   - url             URL to navigate to
+  - sandbox         true for private window (no cookies/cache)
+- newWindow         Create new normal window (returns tabId/windowId/content)
+  - url             URL to navigate to
+  - focus           defaults true
   - sandbox         true for private window (no cookies/cache)
 - setActiveTab      Switch active tab
 - getActiveTab      Get current tab info
@@ -125,6 +130,14 @@ browser newSession '{"url": "https://example.com", "sandbox": true}'
 ```
 
 This opens a private window with no cookies or cached data.
+
+## New Window Example
+
+```
+browser newWindow '{"url": "https://example.com"}'
+```
+
+This opens a new normal Firefox window and returns its `tabId` and `windowId`.
 "##;
     println!("{}", docs);
 }

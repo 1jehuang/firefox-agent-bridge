@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tokio_tungstenite::connect_async;
 
-use crate::config::WS_URL;
+use crate::config::ws_url;
 
 /// Check if we can connect to the WebSocket server
 async fn is_connected() -> bool {
-    match connect_async(WS_URL).await {
+    match connect_async(ws_url()).await {
         Ok((_, _)) => true,
         Err(_) => false,
     }

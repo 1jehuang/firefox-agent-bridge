@@ -1,5 +1,160 @@
 /* eslint-env browser */
+// Cross-browser shim. Firefox and Safari expose browser.*; Chromium browsers
+// (Chrome, Edge, Brave, Chromium) expose promise-based chrome.* under MV3.
+if (typeof globalThis.browser === "undefined" && typeof globalThis.chrome !== "undefined") {
+  globalThis.browser = globalThis.chrome;
+}
 const NATIVE_APP_NAME = "firefox_agent_bridge";
+const IS_GECKO = typeof browser.runtime.getBrowserInfo === "function";
+// Browser action API: MV2 uses browserAction, MV3 uses action.
+const actionApi = browser.action || browser.browserAction;
+// Safari cannot launch arbitrary native hosts, so it talks to the host over a
+// local WebSocket relay instead of native messaging.
+const RELAY_URL = "ws://127.0.0.1:8767/extension";
+const USE_WS_RELAY = typeof browser.runtime.connectNative !== "function"
+  || (typeof navigator !== "undefined" && /Safari\//.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent));
+
+function detectBrowserName() {
+  if (IS_GECKO) return "firefox";
+  const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+  if (/Edg\//.test(ua)) return "edge";
+  if (navigator.brave) return "brave";
+  if (/Chrome\//.test(ua)) return "chrome";
+  if (/Safari\//.test(ua)) return "safari";
+  return "unknown";
+}
+
+// tabs.sendMessage wrapper: non-Gecko content scripts encode thrown errors as
+// {__bridgeError} because they reply through sendResponse.
+async function tabsSendMessage(tabId, message, options) {
+  const result = await browser.tabs.sendMessage(tabId, message, options);
+  if (result && typeof result === "object" && typeof result.__bridgeError === "string") {
+    throw new Error(result.__bridgeError);
+  }
+  return result;
+}
+
+async function injectContentScript(tabId, frameId) {
+  if (browser.scripting && typeof browser.scripting.executeScript === "function") {
+    await browser.scripting.executeScript({
+      target: { tabId, frameIds: [frameId || 0] },
+      files: ["content.js"]
+    });
+    return;
+  }
+  await injectContentScript(tabId, frameId);
+}
+
+// Runs in the page's MAIN world via scripting.executeScript. Must be
+// self-contained because it is serialized into the page.
+function fabMainWorldEvaluate(script) {
+  const summarize = (el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      tag: el.tagName, id: el.id || null, classes: el.className || null,
+      text: el.innerText ? el.innerText.slice(0, 200) : null,
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    };
+  };
+  const serialize = (value) => {
+    if (value === undefined) return { result: null, type: "undefined" };
+    if (value === null) return { result: null, type: "null" };
+    if (typeof value === "function") return { result: value.toString(), type: "function" };
+    if (typeof Element !== "undefined" && value instanceof Element) return { result: summarize(value), type: "element" };
+    if ((typeof NodeList !== "undefined" && value instanceof NodeList) || (typeof HTMLCollection !== "undefined" && value instanceof HTMLCollection)) {
+      return { result: Array.from(value).map(summarize), type: "nodelist" };
+    }
+    try { return { result: JSON.parse(JSON.stringify(value)), type: typeof value }; }
+    catch (e) { return { result: String(value), type: "string" }; }
+  };
+  try {
+    return Promise.resolve(new Function(script)()).then(
+      (value) => Object.assign(serialize(value), { mainWorld: true }),
+      (err) => ({ __bridgeError: "Evaluate error: " + ((err && err.message) || String(err)) })
+    );
+  } catch (err) {
+    return { __bridgeError: "Evaluate error: " + ((err && err.message) || String(err)) };
+  }
+}
+
+const CSP_EVAL_ERROR = /unsafe-eval|Content Security Policy|EvalError/i;
+let userScriptWorldConfigured = false;
+
+async function evaluateViaUserScripts(target, script) {
+  if (!browser.userScripts || typeof browser.userScripts.execute !== "function") return null;
+  try {
+    if (!userScriptWorldConfigured && typeof browser.userScripts.configureWorld === "function") {
+      await browser.userScripts.configureWorld({ csp: "script-src 'self' 'unsafe-eval'" });
+      userScriptWorldConfigured = true;
+    }
+    const code = "(" + fabMainWorldEvaluate.toString() + ")(" + JSON.stringify(script) + ")";
+    const results = await browser.userScripts.execute({ target, js: [{ code }], world: "USER_SCRIPT", injectImmediately: true });
+    return (results && results[0]) || null;
+  } catch (e) {
+    // "Allow user scripts" is off for this extension; use the next strategy.
+    return null;
+  }
+}
+
+// DevTools protocol evaluation ignores the page CSP. Chrome shows a
+// "started debugging this browser" bar while attached, so attach only for
+// the call and only when other strategies were blocked.
+async function evaluateViaDebugger(tabId, script) {
+  if (!browser.debugger) return null;
+  const debuggee = { tabId };
+  let attachedHere = false;
+  try {
+    await browser.debugger.attach(debuggee, "1.3");
+    attachedHere = true;
+  } catch (e) {
+    if (!/already attached/i.test(String(e && e.message))) return null;
+  }
+  try {
+    const expression = "(" + fabMainWorldEvaluate.toString() + ")(" + JSON.stringify(script) + ")";
+    const response = await browser.debugger.sendCommand(debuggee, "Runtime.evaluate", {
+      expression, awaitPromise: true, returnByValue: true, userGesture: true
+    });
+    if (response.exceptionDetails) {
+      const d = response.exceptionDetails;
+      return { result: { __bridgeError: "Evaluate error: " + ((d.exception && d.exception.description) || d.text) } };
+    }
+    return { result: response.result ? response.result.value : undefined };
+  } finally {
+    if (attachedHere) {
+      try { await browser.debugger.detach(debuggee); } catch (e) {}
+    }
+  }
+}
+
+// Chromium/Safari cannot eval in the isolated world (MV3 CSP). Strategies, in
+// order: userScripts world with an eval-permitting CSP (needs "Allow user
+// scripts"), page MAIN world (subject to page CSP), then the debugger.
+async function evaluateOutsideGecko(params) {
+  const tabId = await resolveTabId(params || {});
+  const frameId = Number.isInteger(params && params.frameId) ? params.frameId : 0;
+  const target = { tabId, frameIds: [frameId] };
+  let injection = await evaluateViaUserScripts(target, params.script);
+  if (!injection) {
+    const results = await browser.scripting.executeScript({
+      target, world: "MAIN", func: fabMainWorldEvaluate, args: [params.script]
+    });
+    injection = results && results[0];
+    const blocked = injection && injection.result && typeof injection.result.__bridgeError === "string"
+      && CSP_EVAL_ERROR.test(injection.result.__bridgeError);
+    if (blocked && frameId === 0) {
+      const viaDebugger = await evaluateViaDebugger(tabId, params.script);
+      if (viaDebugger) injection = viaDebugger;
+      else {
+        throw new Error(injection.result.__bridgeError + " (the page Content-Security-Policy blocks eval; enable \"Allow user scripts\" for Browser Agent Bridge in the browser's extension settings)");
+      }
+    }
+  }
+  if (!injection) throw new Error("Evaluate error: no injection result");
+  if (injection.error) throw new Error("Evaluate error: " + (injection.error.message || String(injection.error)));
+  const result = injection.result;
+  if (result && typeof result.__bridgeError === "string") throw new Error(result.__bridgeError);
+  return result;
+}
 
 let nativePort = null;
 let reconnectTimer = null;
@@ -85,6 +240,10 @@ async function showAuthNotification(tabId, authInfo) {
   const notificationId = `auth-${Date.now()}`;
 
   return new Promise((resolve) => {
+    if (!browser.notifications) {
+      resolve({ allowed: false, reason: "notifications-unavailable" });
+      return;
+    }
     browser.notifications.create(notificationId, {
       type: "basic",
       iconUrl: browser.runtime.getURL("icons/icon-48.png"),
@@ -107,7 +266,7 @@ async function showAuthNotification(tabId, authInfo) {
 }
 
 // Handle notification clicks (allow)
-browser.notifications.onClicked.addListener((notificationId) => {
+browser.notifications && browser.notifications.onClicked.addListener((notificationId) => {
   const pending = pendingAuthRequests.get(notificationId);
   if (pending) {
     clearTimeout(pending.timeout);
@@ -118,7 +277,7 @@ browser.notifications.onClicked.addListener((notificationId) => {
 });
 
 // Handle notification closed (deny)
-browser.notifications.onClosed.addListener((notificationId, byUser) => {
+browser.notifications && browser.notifications.onClosed.addListener((notificationId, byUser) => {
   const pending = pendingAuthRequests.get(notificationId);
   if (pending) {
     clearTimeout(pending.timeout);
@@ -133,16 +292,16 @@ loadAuthConfig();
 
 function updateBadge() {
   if (activeRequests > 0) {
-    browser.browserAction.setBadgeText({ text: "AI" });
-    browser.browserAction.setBadgeBackgroundColor({ color: "#4ade80" });
-    browser.browserAction.setTitle({ title: "Browser Agent Bridge - AI Active" });
+    actionApi.setBadgeText({ text: "AI" });
+    actionApi.setBadgeBackgroundColor({ color: "#4ade80" });
+    actionApi.setTitle({ title: "Browser Agent Bridge - AI Active" });
   } else if (!isConnected) {
-    browser.browserAction.setBadgeText({ text: "!" });
-    browser.browserAction.setBadgeBackgroundColor({ color: "#ef4444" });
-    browser.browserAction.setTitle({ title: "Browser Agent Bridge - Disconnected" });
+    actionApi.setBadgeText({ text: "!" });
+    actionApi.setBadgeBackgroundColor({ color: "#ef4444" });
+    actionApi.setTitle({ title: "Browser Agent Bridge - Disconnected" });
   } else {
-    browser.browserAction.setBadgeText({ text: "" });
-    browser.browserAction.setTitle({ title: "Browser Agent Bridge - Idle" });
+    actionApi.setBadgeText({ text: "" });
+    actionApi.setTitle({ title: "Browser Agent Bridge - Idle" });
   }
   broadcastStatus();
 }
@@ -182,28 +341,75 @@ function scheduleReconnect() {
   }, 1500);
 }
 
+function markDisconnected() {
+  nativePort = null;
+  isConnected = false;
+  updateBadge();
+  scheduleReconnect();
+}
+
+// Wrap a WebSocket to the host relay in the same shape as a native Port.
+function connectRelayPort() {
+  const socket = new WebSocket(RELAY_URL);
+  const port = {
+    transport: "websocket-relay",
+    postMessage(payload) {
+      if (socket.readyState !== WebSocket.OPEN) throw new Error("Bridge relay not connected");
+      socket.send(JSON.stringify(payload));
+    }
+  };
+  socket.addEventListener("open", () => {
+    isConnected = true;
+    updateBadge();
+    port.postMessage({ type: "hello", version: "0.3.0", browser: detectBrowserName() });
+  });
+  socket.addEventListener("message", (event) => {
+    let message;
+    try { message = JSON.parse(event.data); } catch (e) { return; }
+    handleNativeMessage(message);
+  });
+  socket.addEventListener("close", () => {
+    if (nativePort === port) markDisconnected();
+  });
+  socket.addEventListener("error", () => {
+    try { socket.close(); } catch (e) {}
+  });
+  return port;
+}
+
 function connectNative() {
   if (nativePort) return;
   try {
-    nativePort = browser.runtime.connectNative(NATIVE_APP_NAME);
-    nativePort.onMessage.addListener(handleNativeMessage);
-    nativePort.onDisconnect.addListener(() => {
-      nativePort = null;
-      isConnected = false;
-      updateBadge();
-      scheduleReconnect();
+    if (USE_WS_RELAY) {
+      nativePort = connectRelayPort();
+      return;
+    }
+    const port = browser.runtime.connectNative(NATIVE_APP_NAME);
+    nativePort = port;
+    port.onMessage.addListener(handleNativeMessage);
+    port.onDisconnect.addListener(() => {
+      // Reading lastError marks it handled in Chromium.
+      void (browser.runtime && browser.runtime.lastError);
+      if (nativePort === port) markDisconnected();
     });
-    nativePort.postMessage({ type: "hello", version: "0.2.0" });
+    port.postMessage({ type: "hello", version: "0.3.0", browser: detectBrowserName() });
     isConnected = true;
     updateBadge();
   } catch (err) {
     console.error("Failed to connect native host", err);
-    nativePort = null;
-    isConnected = false;
-    updateBadge();
-    scheduleReconnect();
+    markDisconnected();
   }
 }
+
+// MV3 service workers (Chromium) and non-persistent Safari backgrounds can be
+// suspended. An alarm wakes the worker so it re-establishes the bridge.
+if (browser.alarms) {
+  browser.alarms.create("fab-reconnect", { periodInMinutes: 0.5 });
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === "fab-reconnect" && !nativePort) connectNative();
+  });
+}
+if (browser.runtime.onStartup) browser.runtime.onStartup.addListener(() => connectNative());
 
 // Chunked file transfer reassembly
 const pendingChunks = new Map(); // transferId -> { fileName, mimeType, totalChunks, chunks: [] }
@@ -318,7 +524,13 @@ async function dispatchAction(action, params, profile) {
 
   switch (action) {
     case "ping":
-      return { pong: true, time: Date.now() };
+      return {
+        pong: true,
+        time: Date.now(),
+        browser: detectBrowserName(),
+        transport: USE_WS_RELAY ? "websocket-relay" : "native-messaging",
+        extensionVersion: browser.runtime.getManifest().version
+      };
 
     case "reload":
       // Reload the extension - response sent before reload happens
@@ -331,17 +543,19 @@ async function dispatchAction(action, params, profile) {
 
     // Session/Tab Management
     case "listTabs":
-      return listAllTabs();
+      return listAllTabs(params);
     case "switchTab":
       return setActiveTab({ ...params, focus: true });
     case "listDownloads":
       return listDownloads(params);
     case "newSession":
       return newSession(params);
+    case "newWindow":
+      return newWindow(params);
     case "setActiveTab":
       return setActiveTab(params);
     case "getActiveTab":
-      return getActiveTabInfo();
+      return getActiveTabInfo(params);
 
     // Navigation
     case "navigate":
@@ -402,6 +616,9 @@ async function dispatchAction(action, params, profile) {
 
     // JavaScript evaluation
     case "evaluate":
+      if (!IS_GECKO && !(params && params.isolatedWorld)) {
+        return evaluateOutsideGecko(params);
+      }
       return sendToContent("evaluate", params, profile);
 
     // Scrolling
@@ -478,7 +695,7 @@ async function executeScout(params, profile) {
     await new Promise(r => setTimeout(r, 200));
 
     // Get initial page info
-    const startPage = await browser.tabs.sendMessage(tab.id,
+    const startPage = await tabsSendMessage(tab.id,
       { type: "agent-bridge", action: "preexplore", params: { goal, maxLinks: 10 } },
       { frameId: 0 }
     );
@@ -501,7 +718,7 @@ async function executeScout(params, profile) {
           await waitForTabComplete(tab.id, 10000);
           await new Promise(r => setTimeout(r, 150));
 
-          const pageInfo = await browser.tabs.sendMessage(tab.id,
+          const pageInfo = await tabsSendMessage(tab.id,
             { type: "agent-bridge", action: "preexplore", params: { goal, maxLinks: 5 } },
             { frameId: 0 }
           );
@@ -702,6 +919,13 @@ async function executeParallel(params, profile) {
 
 async function resolveTabId(params) {
   if (params && Number.isInteger(params.tabId)) return params.tabId;
+  // Window-scoped resolution: use the active tab of the given window without
+  // touching the shared global cache (parallel-agent isolation).
+  if (params && Number.isInteger(params.windowId)) {
+    const winTabs = await browser.tabs.query({ active: true, windowId: params.windowId });
+    if (!winTabs.length) throw new Error(`No active tab found in window ${params.windowId}`);
+    return winTabs[0].id;
+  }
   if (Number.isInteger(cachedActiveTabId) && Number.isInteger(cachedWindowId)) {
     return cachedActiveTabId;
   }
@@ -712,8 +936,8 @@ async function resolveTabId(params) {
   return tabs[0].id;
 }
 
-async function getActiveTabInfo() {
-  const tabId = await resolveTabId({});
+async function getActiveTabInfo(params) {
+  const tabId = await resolveTabId(params || {});
   const tab = await browser.tabs.get(tabId);
   return { tabId: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId };
 }
@@ -737,7 +961,7 @@ async function listFrames(params) {
     // Try to get content summary from each frame
     try {
       const message = { type: "agent-bridge", action: "getInteractables", params: {} };
-      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      const result = await tabsSendMessage(tabId, message, { frameId: frame.frameId });
       if (result) {
         info.title = result.title || null;
         const elements = result.elements || [];
@@ -760,9 +984,13 @@ async function listFrames(params) {
   return { frames: results, tabId };
 }
 
-async function listAllTabs() {
-  const tabs = await browser.tabs.query({});
-  const windows = await browser.windows.getAll();
+async function listAllTabs(params) {
+  const filterWindowId = Number.isInteger(params?.windowId) ? params.windowId : null;
+  const tabs = await browser.tabs.query(filterWindowId !== null ? { windowId: filterWindowId } : {});
+  const allWindows = await browser.windows.getAll();
+  const windows = filterWindowId !== null
+    ? allWindows.filter(w => w.id === filterWindowId)
+    : allWindows;
 
   const tabsByWindow = {};
   for (const win of windows) {
@@ -792,31 +1020,36 @@ async function listAllTabs() {
   };
 }
 
-// Create a new session (new tab)
-async function newSession(params) {
+async function openSessionTarget(params, options = {}) {
   const url = params?.url || "about:blank";
   const sandbox = params?.sandbox === true;
+  const openInWindow = options.openInWindow === true || sandbox;
   let tab;
 
-  if (sandbox) {
-    // Create a private (incognito) window for sandbox mode
-    // This gives us a clean slate: no cookies, no logins, no cache
-    const privateWindow = await browser.windows.create({
+  if (openInWindow) {
+    const createdWindow = await browser.windows.create({
       url,
-      incognito: true,
-      focused: params?.focus === true
+      incognito: sandbox,
+      focused: params?.focus ?? options.defaultFocus ?? true
     });
-    tab = privateWindow.tabs[0];
+    tab = createdWindow.tabs[0];
   } else {
-    tab = await browser.tabs.create({ url, active: params?.focus === true });
+    const createProps = { url, active: params?.focus === true };
+    if (Number.isInteger(params?.windowId)) {
+      createProps.windowId = params.windowId;
+      createProps.active = true;
+    }
+    tab = await browser.tabs.create(createProps);
   }
 
   if (url !== "about:blank" && params?.wait !== false) {
     await waitForTabComplete(tab.id, params?.timeoutMs || 15000);
   }
 
-  cachedActiveTabId = tab.id;
-  cachedWindowId = tab.windowId;
+  if (!Number.isInteger(params?.windowId)) {
+    cachedActiveTabId = tab.id;
+    cachedWindowId = tab.windowId;
+  }
 
   const result = {
     tabId: tab.id,
@@ -831,7 +1064,7 @@ async function newSession(params) {
     try {
       await new Promise(r => setTimeout(r, 100)); // Wait for content script
       const format = params?.contentFormat || "annotated";
-      const content = await sendToContent("getContent", { format }, false);
+      const content = await sendToContent("getContent", { format, tabId: tab.id }, false);
       result.content = content;
     } catch (err) {
       result.contentError = err.message;
@@ -839,6 +1072,18 @@ async function newSession(params) {
   }
 
   return result;
+}
+
+// Create a new session (new tab by default; dedicated window with window:true,
+// private window in sandbox mode)
+async function newSession(params) {
+  const openInWindow = params?.window === true;
+  return openSessionTarget(params, { openInWindow, defaultFocus: false });
+}
+
+// Create a new browser window and return its tab/window ids
+async function newWindow(params) {
+  return openSessionTarget(params, { openInWindow: true, defaultFocus: true });
 }
 
 // Set which tab the agent is working on
@@ -1004,7 +1249,9 @@ async function navigateTo(params) {
   let tabId;
 
   if (params.newTab) {
-    const tab = await browser.tabs.create({ url: params.url, active: true });
+    const createProps = { url: params.url, active: true };
+    if (Number.isInteger(params.windowId)) createProps.windowId = params.windowId;
+    const tab = await browser.tabs.create(createProps);
     tabId = tab.id;
     if (params.wait !== false) await waitForTabComplete(tabId, params.timeoutMs);
   } else {
@@ -1015,10 +1262,12 @@ async function navigateTo(params) {
 
   // Update cache to the tab we actually navigated
   const tab = await browser.tabs.get(tabId);
-  cachedActiveTabId = tabId;
-  cachedWindowId = tab.windowId;
+  if (!Number.isInteger(params.windowId)) {
+    cachedActiveTabId = tabId;
+    cachedWindowId = tab.windowId;
+  }
 
-  const result = { tabId, url: params.url };
+  const result = { tabId, windowId: tab.windowId, url: params.url };
 
   // Small delay to ensure content script is ready
   await new Promise(r => setTimeout(r, 100));
@@ -1057,18 +1306,28 @@ async function sendToContent(action, params, profile) {
   }
   // Default to main frame (frameId: 0) to avoid responding from iframes like Stripe trackers
   const frameId = (params && Number.isInteger(params.frameId)) ? params.frameId : 0;
-  return browser.tabs.sendMessage(tabId, message, { frameId });
+  try {
+    return await tabsSendMessage(tabId, message, { frameId });
+  } catch (e) {
+    if (e.message && e.message.includes("Could not establish connection")) {
+      // Content script not injected - try programmatic injection
+      await injectContentScript(tabId, frameId);
+      await new Promise(r => setTimeout(r, 200));
+      return tabsSendMessage(tabId, message, { frameId });
+    }
+    throw e;
+  }
 }
 
 async function sendToContentAllFrames(tabId, message) {
   const frames = await browser.webNavigation.getAllFrames({ tabId });
   if (!frames || frames.length === 0) {
-    return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+    return tabsSendMessage(tabId, message, { frameId: 0 });
   }
   const results = [];
   for (const frame of frames) {
     try {
-      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      const result = await tabsSendMessage(tabId, message, { frameId: frame.frameId });
       if (result && typeof result === "object") {
         result.__frameId = frame.frameId;
         result.__frameUrl = frame.url;
@@ -1088,13 +1347,13 @@ async function sendToContentAllFrames(tabId, message) {
 async function sendToContentFirstSuccess(tabId, message, successTest) {
   const frames = await browser.webNavigation.getAllFrames({ tabId });
   if (!frames || frames.length === 0) {
-    return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+    return tabsSendMessage(tabId, message, { frameId: 0 });
   }
   // Try main frame first (frameId 0), then subframes
   const sorted = frames.slice().sort((a, b) => a.frameId - b.frameId);
   for (const frame of sorted) {
     try {
-      const result = await browser.tabs.sendMessage(tabId, message, { frameId: frame.frameId });
+      const result = await tabsSendMessage(tabId, message, { frameId: frame.frameId });
       if (successTest(result)) {
         if (result && typeof result === "object") {
           result.__frameId = frame.frameId;
@@ -1107,11 +1366,21 @@ async function sendToContentFirstSuccess(tabId, message, successTest) {
     }
   }
   // If no frame succeeded, try main frame as fallback
-  return browser.tabs.sendMessage(tabId, message, { frameId: 0 });
+  return tabsSendMessage(tabId, message, { frameId: 0 });
 }
 
 async function captureScreenshot(params) {
   const tabId = await resolveTabId(params || {});
+  // Prefer captureTab: captures a specific tab without stealing focus
+  // (critical when multiple agents drive different windows in parallel).
+  if (typeof browser.tabs.captureTab === "function") {
+    try {
+      const dataUrl = await browser.tabs.captureTab(tabId, { format: "png" });
+      return { tabId, dataUrl };
+    } catch (e) {
+      // Fall through to legacy captureVisibleTab path
+    }
+  }
   const tab = await browser.tabs.get(tabId);
   // Make the target tab active temporarily so captureVisibleTab captures it
   const wasActive = tab.active;
@@ -1126,6 +1395,7 @@ async function captureScreenshot(params) {
 async function listDownloads(params) {
   const query = { orderBy: ["-startTime"], limit: (params && params.limit) || 10 };
   if (params && params.filenameRegex) query.filenameRegex = params.filenameRegex;
+  if (!browser.downloads) throw new Error("listDownloads is not supported in this browser");
   const items = await browser.downloads.search(query);
   return {
     downloads: items.map(d => ({
