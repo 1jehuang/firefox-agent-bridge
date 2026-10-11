@@ -552,9 +552,16 @@ async function handleClick(params) {
     target.dispatchEvent(new MouseEvent("mouseover", eventInit));
     target.dispatchEvent(new MouseEvent("mousedown", eventInit));
     target.dispatchEvent(new MouseEvent("mouseup", eventInit));
-    target.dispatchEvent(new MouseEvent("click", eventInit));
-  }
-  if (typeof target.click === "function") target.click();
+    }
+  // Exactly one activation. click() fires the click event and runs the default
+// action; a target without click() (e.g. SVGElement, MathMLElement) still needs
+// the explicit event, and only when dispatchEvents was not disabled.
+if (typeof target.click === "function") {
+  target.click();
+} else if (params.dispatchEvents !== false) {
+  const clickInit = { bubbles: true, cancelable: true, view: window };
+  target.dispatchEvent(new MouseEvent("click", clickInit));
+}
 
   return { clicked: true, element: elementSummary(target) };
 }
