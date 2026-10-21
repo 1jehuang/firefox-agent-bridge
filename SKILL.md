@@ -47,7 +47,7 @@ browser --record /path/to/dir <action> '<json_params>'
 |--------|-------------|------------|
 | `listTabs` | List all open tabs across windows | - |
 | `newSession` | Create new tab to work in | `url` (optional), `sandbox` (private window) |
-| `newWindow` | Create a new normal window to work in | `url` (optional), `focus` (defaults true), `sandbox` (private window) |
+| `newWindow` | Create a new normal window to work in | `url` (optional), `focus` (defaults false), `sandbox` (private window) |
 | `setActiveTab` | Switch which tab agent works on | `tabId`, `focus` |
 | `getActiveTab` | Get current tab info | - |
 

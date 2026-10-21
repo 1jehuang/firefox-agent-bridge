@@ -25,7 +25,7 @@ When `profile` (or `params.profile`) is true, responses include a `timing` objec
 
 Params:
 - `url` (optional, defaults to `about:blank`)
-- `focus` (optional, defaults true)
+- `focus` (optional, defaults false; agent windows stay in the background so they never steal focus from the human)
 - `wait` (optional, boolean)
 - `timeoutMs` (optional)
 - `sandbox` (optional, boolean; opens private window with no cookies/cache)
@@ -44,6 +44,7 @@ Params:
 - `url` (required)
 - `tabId` (optional)
 - `newTab` (optional, boolean)
+- `focus` (optional, defaults false; only meaningful with `newTab`)
 - `wait` (optional, boolean)
 - `timeoutMs` (optional)
 

@@ -23,5 +23,9 @@
   },
   "engines": {
     "node": ">=16.0.0"
+  },
+  "scripts": {
+    "test:focus": "node tests/focus-safety.test.js",
+    "test": "node tests/focus-safety.test.js"
   }
 }

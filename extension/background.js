@@ -1035,9 +1035,10 @@ async function openSessionTarget(params, options = {}) {
     tab = createdWindow.tabs[0];
   } else {
     const createProps = { url, active: params?.focus === true };
+    // Targeting a specific window must not imply activation: raising a tab
+    // in another window pulls focus away from whatever the human is doing.
     if (Number.isInteger(params?.windowId)) {
       createProps.windowId = params.windowId;
-      createProps.active = true;
     }
     tab = await browser.tabs.create(createProps);
   }
@@ -1083,7 +1084,9 @@ async function newSession(params) {
 
 // Create a new browser window and return its tab/window ids
 async function newWindow(params) {
-  return openSessionTarget(params, { openInWindow: true, defaultFocus: true });
+  // Agent-created windows stay in the background unless focus is requested
+  // explicitly. Parallel agents otherwise fight the human for the foreground.
+  return openSessionTarget(params, { openInWindow: true, defaultFocus: false });
 }
 
 // Set which tab the agent is working on
@@ -1249,7 +1252,7 @@ async function navigateTo(params) {
   let tabId;
 
   if (params.newTab) {
-    const createProps = { url: params.url, active: true };
+    const createProps = { url: params.url, active: params.focus === true };
     if (Number.isInteger(params.windowId)) createProps.windowId = params.windowId;
     const tab = await browser.tabs.create(createProps);
     tabId = tab.id;
@@ -1382,14 +1385,30 @@ async function captureScreenshot(params) {
     }
   }
   const tab = await browser.tabs.get(tabId);
-  // Make the target tab active temporarily so captureVisibleTab captures it
+  // Legacy fallback: captureVisibleTab can only see the active tab, so a
+  // background tab would require activating it. That is a focus steal, so
+  // restore the previously active tab afterwards instead of leaving the
+  // agent's tab in the foreground.
   const wasActive = tab.active;
+  let previousActiveTabId = null;
   if (!wasActive) {
+    const [previous] = await browser.tabs.query({ active: true, windowId: tab.windowId });
+    previousActiveTabId = previous?.id ?? null;
     await browser.tabs.update(tabId, { active: true });
     await new Promise(r => setTimeout(r, 150)); // Wait for tab to render
   }
-  const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-  return { tabId, dataUrl };
+  try {
+    const dataUrl = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    return { tabId, dataUrl };
+  } finally {
+    if (previousActiveTabId !== null && previousActiveTabId !== tabId) {
+      try {
+        await browser.tabs.update(previousActiveTabId, { active: true });
+      } catch (e) {
+        // Tab vanished mid-capture; nothing to restore.
+      }
+    }
+  }
 }
 
 async function listDownloads(params) {
