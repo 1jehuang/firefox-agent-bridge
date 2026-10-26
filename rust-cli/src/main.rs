@@ -21,6 +21,10 @@ async fn main() -> Result<()> {
     // Handle subcommands first
     if let Some(command) = cli.command {
         return match command {
+            Command::Help => {
+                docs::print_help();
+                Ok(())
+            }
             Command::Docs => {
                 docs::print_docs();
                 Ok(())

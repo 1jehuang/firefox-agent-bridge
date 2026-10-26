@@ -5,7 +5,13 @@ use clap::{Parser, Subcommand};
     name = "browser",
     version,
     about = "Control Firefox browser from LLM agents via WebSocket",
-    long_about = None
+    long_about = None,
+    // `browser help` must print the action table, so the built-in help
+    // subcommand is disabled and the explicit `Help` variant below owns the
+    // word. Without this, clap answers `browser help` with its own usage dump
+    // and the action table never reaches the user.
+    disable_help_subcommand = true,
+    after_help = "Run `browser help` to list the actions the extension exposes."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -31,6 +37,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Show the action table
+    Help,
+
     /// Show full documentation
     Docs,
 
