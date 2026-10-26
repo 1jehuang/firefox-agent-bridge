@@ -135,12 +135,45 @@ jobs:
             echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      # AMO signs the extension out of band, so a release carries the newest
+      # signed XPI forward instead of shipping the unsigned local build. A
+      # carried XPI that does not match this tag shipped silently (#11), so a
+      # mismatch keeps the release a draft until a maintainer attaches the
+      # signed package for this version and publishes it.
+      - name: Check Firefox XPI version
+        id: xpi
+        working-directory: release
+        run: |
+          expected="${VERSION#v}"
+          # Exactly one XPI is expected here: the signed package carried forward.
+          xpi="$(find . -maxdepth 1 -name '*.xpi' -print | sort | head -n 1)"
+          xpi="${xpi#./}"
+          if [ -z "$xpi" ]; then
+            actual="missing"
+          else
+            actual="$(python3 - "$xpi" <<'PY'
+          import json, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              print(json.loads(archive.read("manifest.json"))["version"])
+          PY
+          )"
+          fi
+          echo "Firefox XPI: ${xpi:-none}, manifest version: ${actual}, release version: ${expected}"
+          if [ "$actual" = "$expected" ]; then
+            echo "matches=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "matches=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::The attached Firefox XPI (${actual}) does not match the release version (${expected}). The release is created as a draft: attach the AMO-signed XPI for ${expected}, remove the stale one, refresh checksums.txt, then publish."
+          fi
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: firefox-agent-bridge ${{ steps.version.outputs.version }}
-          draft: false
+          draft: ${{ steps.xpi.outputs.matches != 'true' }}
           prerelease: false
           files: |
             release/*
@@ -174,6 +207,8 @@ jobs:
             | Firefox | `browser-agent-bridge-<version>.xpi` |
             | Chrome, Edge, Brave, Chromium | `browser-agent-bridge-chrome-<version>.zip` (load unpacked) |
             | Safari (macOS) | `browser-agent-bridge-safari-<version>.zip` (convert with `scripts/package-safari.sh`) |
+
+            ${{ steps.xpi.outputs.matches != 'true' && '> **Draft:** the attached Firefox XPI does not match this version. Upload the AMO-signed XPI, remove the stale one, refresh `checksums.txt`, then publish.' || '' }}
 
             **Quick install (Linux/macOS):**
             ```bash
